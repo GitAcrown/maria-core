@@ -17,6 +17,9 @@ def decide(message: Inbound, policy: Policy) -> Route:
         return Route(Action.RESPOND, "mention")
     if message.mention_everyone and policy.respond_everyone:
         return Route(Action.RESPOND, "everyone")
+    called = _called_by_name(message.text, message.bot_names)
+    if called is not None:
+        return called
     if policy.mode is ReplyMode.GREEDY:
         return _greedy(message.text, message.bot_names)
     return Route(Action.STORE, "not_addressed")
@@ -26,6 +29,14 @@ def _bot(message: Inbound) -> Route:
     if message.is_dm:
         return Route(Action.IGNORE, "other_bot")
     return Route(Action.STORE, "other_bot")
+
+
+def _called_by_name(text: str, names: tuple[str, ...]) -> Route | None:
+    """« maria ? » ou « hey maria » s'adresse à elle, même en mode strict."""
+    for name in names:
+        if name_hit_kind(text, name) == "edge":
+            return Route(Action.RESPOND, "name_edge")
+    return None
 
 
 def _greedy(text: str, names: tuple[str, ...]) -> Route:

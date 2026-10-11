@@ -130,7 +130,15 @@ class App:
     async def _report(self, prompt: str) -> str:
         completion = await self.llm.complete(
             [
-                {"role": "system", "content": "Rédige le message demandé, court, sans inventer."},
+                {
+                    "role": "system",
+                    "content": (
+                        "Tu exécutes une consigne, ce n'est pas une conversation. "
+                        "Une phrase, deux max. Uniquement ce qui est demandé. "
+                        "Tutoiement, sans emoji, sans commencer par ton nom. "
+                        "N'invente aucun fait : s'il manque une preuve, dis-le en une phrase."
+                    ),
+                },
                 {"role": "user", "content": prompt},
             ]
         )

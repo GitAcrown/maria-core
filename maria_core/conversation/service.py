@@ -106,6 +106,9 @@ class ConversationService:
             return None
         return await self._answer(latest, policy, thinking)
 
+    def forget_channel(self, channel_id: int) -> None:
+        self._histories.pop(channel_id, None)
+
     def transcript(self, channel_id: int) -> tuple[str, ...]:
         history = self._histories.get(channel_id)
         if history is None:

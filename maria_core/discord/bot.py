@@ -13,6 +13,7 @@ from maria_core.db.retention import purge
 from maria_core.discord.chat import ChatCog
 from maria_core.discord.commands.memory import MemoryCommands
 from maria_core.discord.commands.owner import OwnerCommands
+from maria_core.discord.commands.public import PublicCommands
 from maria_core.discord.commands.social import SocialCommands
 from maria_core.discord.directory import DiscordDirectory
 from maria_core.discord.memory_view import restore_proposals
@@ -70,6 +71,7 @@ class MariaBot(commands.Bot):
         await self.add_cog(SignalCog(self))
         await self.add_cog(reactions)
         await self.add_cog(SocialCommands(self))
+        await self.add_cog(PublicCommands(self))
 
     async def close(self) -> None:
         self.app.objectives.scheduler.stop()

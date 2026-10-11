@@ -103,6 +103,16 @@ def _show(service: Any) -> Callable[[Context, Mapping[str, Any]], Any]:
     return run
 
 
+def operate(service: Any, owner_id: int, objective_id: int, op: str) -> Objective:
+    """Pause, reprise, saut, annulation ou confirmation, pour le menu des tâches."""
+    objective = service.store.get(objective_id)
+    if objective is None or objective.owner_id != owner_id:
+        raise ValueError("Objectif introuvable.")
+    if op not in {"pause", "resume", "cancel", "skip", "confirm"}:
+        raise ValueError("Opération inconnue.")
+    return _apply(service, objective, {"op": op})
+
+
 def _apply(service: Any, objective: Objective, args: Mapping[str, Any]) -> Objective:
     now = service.now()
     op = str(args["op"])

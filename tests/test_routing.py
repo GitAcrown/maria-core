@@ -44,6 +44,15 @@ def test_off_stores_even_a_mention() -> None:
     assert route.reason == "off"
 
 
+def test_strict_answers_when_called_by_name() -> None:
+    route = _route(_message(text="maria ?"))
+    assert route.action is Action.RESPOND
+    assert route.reason == "name_edge"
+    about = _route(_message(text="faut que Maria fasse ça"))
+    assert about.action is Action.STORE
+    assert about.reason == "not_addressed"
+
+
 def test_strict_answers_mention_reply_and_opt_in_everyone() -> None:
     assert _route(_message(mentioned=True)).reason == "mention"
     assert _route(_message(reply_to_bot=True)).reason == "reply"
