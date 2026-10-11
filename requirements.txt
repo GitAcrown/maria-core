@@ -1,0 +1,6 @@
+discord.py>=2.4,<3
+openai>=1.40,<3
+typesafe-sdk>=0.1
+python-dotenv>=1.0,<2
+chromadb>=1.0,<2
+tzdata>=2024.1; sys_platform == "win32"
