@@ -1,4 +1,4 @@
-"""Boutons Retenir / Ignorer sur une proposition."""
+"""Boutons Retenir / Ignorer sous une proposition. La réponse de MARIA n'est jamais effacée."""
 
 import asyncio
 
@@ -58,15 +58,16 @@ async def _answer(interaction: discord.Interaction, proposal_id: int, *, accept:
             text = "C'est noté."
         else:
             await asyncio.to_thread(app.memory.store.ignore, proposal_id, actor, app.memory.now())
-            text = "D'accord, j'oublie cette proposition."
+            text = "D'accord, je ne le retiens pas."
     except (MemoryDenied, ValueError):
-        text = "Je ne peux pas modifier cette proposition."
-    if interaction.response.is_done():
+        await interaction.response.send_message(
+            "Cette proposition ne t'est pas adressée, ou elle est déjà traitée.", ephemeral=True
+        )
         return
-    await interaction.response.edit_message(content=text, view=None)
+    await interaction.response.edit_message(view=None)
+    await interaction.followup.send(text, ephemeral=True)
 
 
 def _moderator(interaction: discord.Interaction) -> bool:
-    user = interaction.user
-    permissions = getattr(user, "guild_permissions", None)
+    permissions = getattr(interaction.user, "guild_permissions", None)
     return bool(permissions and permissions.manage_messages)

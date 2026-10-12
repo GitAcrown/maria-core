@@ -45,6 +45,10 @@ class OpenAIChatClient:
         self._max_tokens = max_tokens
         self._client: AsyncOpenAI | None = None
 
+    @property
+    def model_name(self) -> str:
+        return self._model
+
     async def complete(
         self,
         messages: Sequence[Mapping[str, Any]],
@@ -96,7 +100,7 @@ class OpenAIChatClient:
         if tools:
             payload["tools"] = [dict(tool) for tool in tools]
             payload["tool_choice"] = tool_choice
-            if tool_choice == "auto":
+            if tool_choice != "none":
                 payload["parallel_tool_calls"] = True
         return payload
 

@@ -74,6 +74,7 @@ class Settings:
     spotify_client_secret: str
     prim_api_key: str
     sncf_api_key: str
+    api_football_key: str
     data_dir: Path
     command_prefix: str
     log_level: str
@@ -127,6 +128,7 @@ class Settings:
             spotify_client_secret=source.get("SPOTIFY_CLIENT_SECRET", "").strip(),
             prim_api_key=source.get("PRIM_API_KEY", "").strip(),
             sncf_api_key=source.get("SNCF_API_KEY", "").strip(),
+            api_football_key=source.get("API_FOOTBALL_KEY", "").strip(),
             data_dir=Path(source.get("DATA_DIR", "data").strip() or "data"),
             command_prefix=source.get("COMMAND_PREFIX", "5!").strip(),
             log_level=(source.get("LOG_LEVEL", "INFO").strip() or "INFO").upper(),
@@ -148,6 +150,7 @@ class Settings:
             spotify_client_secret="",
             prim_api_key="",
             sncf_api_key="",
+            api_football_key="",
             data_dir=data_dir,
             command_prefix="5!",
             log_level="INFO",

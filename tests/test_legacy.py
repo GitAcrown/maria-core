@@ -15,9 +15,8 @@ _NOW = datetime(2026, 10, 11, 18, 0, tzinfo=UTC)
 def test_the_report_lists_what_cannot_be_converted(tmp_path: Path) -> None:
     root = _legacy(tmp_path)
     text = render(scan(root, now=_NOW))
-    assert "tâche 5 : recherche web non portée" in text
-    assert "tâche 6 : signal Discord ciblé non porté" in text
-    assert "comparaison de prix non portée" in text
+    assert "recherche web non portée" not in text
+    assert "signal Discord ciblé non porté" not in text
     assert "statut terminal" in text
     assert "fun stats retirées" in text
     assert "signets retirés" in text
@@ -78,11 +77,31 @@ def _expect_imported(database: Database) -> None:
         "2": "daily",
         "3": "weekly",
         "4": "interval",
+        "5": "at",
+        "6": "on_voice",
         "7": "on_topic",
         "10": "at",
         "11": "at",
+        "12": "interval",
     }
-    assert set(kinds) == {"1", "2", "3", "4", "7", "10", "11"}
+    voice = database.fetchone(
+        """
+        SELECT trigger_json FROM objectives
+        JOIN legacy_map ON legacy_map.row_id = objectives.id
+        WHERE legacy_map.source = 'task' AND legacy_map.legacy_id = '6'
+        """
+    )
+    assert voice is not None
+    assert json.loads(voice["trigger_json"])["user_id"] == 7
+    relative = database.fetchone(
+        """
+        SELECT condition_json FROM objectives
+        JOIN legacy_map ON legacy_map.row_id = objectives.id
+        WHERE legacy_map.source = 'task' AND legacy_map.legacy_id = '12'
+        """
+    )
+    assert relative is not None
+    assert json.loads(relative["condition_json"])["type"] == "price_lower"
     watch = database.fetchone(
         """
         SELECT action_json, condition_json, state_json FROM objectives
@@ -299,7 +318,7 @@ def _tasks(path: Path) -> None:
             "watch",
             "once",
             "pending",
-            _watch("lt_prev"),
+            _watch("lt_prev", "relatif"),
             "{}",
             "2026-10-11T18:00:00+00:00",
             "",
@@ -329,14 +348,14 @@ def _tasks(path: Path) -> None:
     connection.close()
 
 
-def _watch(op: str) -> str:
+def _watch(op: str, var_key: str = "prix") -> str:
     return json.dumps(
         {
             "url": "https://example.test/p",
             "op": op,
             "threshold": 20,
             "interval_minutes": 360,
-            "var_key": "prix",
+            "var_key": var_key,
         }
     )
 

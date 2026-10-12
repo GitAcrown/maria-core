@@ -1,6 +1,7 @@
 """Ce que l'adaptateur Discord fournit aux capacités, sans que celles-ci l'importent."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 
@@ -33,8 +34,24 @@ class GuildDirectory(Protocol):
     async def channel(self, channel_id: int) -> ChannelCard | None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class HistoryWindow:
+    after: datetime | None
+    limit: int
+    label: str
+
+
 class ChannelReader(Protocol):
-    async def recent(self, channel_id: int, limit: int) -> tuple[str, ...]: ...
+    async def history(
+        self,
+        channel_id: int,
+        window: HistoryWindow,
+        *,
+        user_id: int,
+        guild_id: int | None,
+    ) -> tuple[str, ...] | str:
+        """Lignes « [HH:MM] Nom : texte ». Une chaîne si la lecture est refusée."""
+        ...
 
 
 class PollPoster(Protocol):

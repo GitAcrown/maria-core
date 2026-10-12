@@ -8,13 +8,26 @@ from discord import app_commands
 from discord.ext import commands
 
 from maria_core.app import App
-from maria_core.conversation.policy import save_everyone, save_mode, save_transcribe
+from maria_core.capabilities.builtin.python_tool import set_python
+from maria_core.conversation.policy import (
+    save_everyone,
+    save_mode,
+    save_personality,
+    save_transcribe,
+)
 from maria_core.discord.menus import send_memory, send_tasks
+from maria_core.social.levels import LEVELS, set_level, set_member_level
 
 _MODES = [
     app_commands.Choice(name="Off — ne répond plus", value="off"),
     app_commands.Choice(name="Strict — mention, réponse, ou son prénom", value="strict"),
     app_commands.Choice(name="Greedy — répond aussi quand on parle d'elle", value="greedy"),
+]
+_LEVELS = [
+    app_commands.Choice(name="Off — aucune réaction spontanée", value="off"),
+    app_commands.Choice(name="Discret", value="quiet"),
+    app_commands.Choice(name="Normal", value="normal"),
+    app_commands.Choice(name="Bavard", value="chatty"),
 ]
 
 
@@ -90,6 +103,75 @@ class PublicCommands(commands.Cog):
     async def autotranscribe(self, interaction: discord.Interaction, actif: bool) -> None:
         await _toggle(self.bot, interaction, transcribe=actif)
 
+    @chatbot.command(name="python", description="Autoriser run_python sur ce serveur")
+    async def python(self, interaction: discord.Interaction, actif: bool) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            return
+        await asyncio.to_thread(set_python, _app(self.bot).database, guild.id, actif, _stamp())
+        state = "activé" if actif else "désactivé"
+        await interaction.response.send_message(f"run_python **{state}**.", ephemeral=True)
+
+    @chatbot.command(name="spontaneite", description="Réactions spontanées de MARIA")
+    @app_commands.choices(niveau=_LEVELS)
+    async def spontaneity(
+        self, interaction: discord.Interaction, niveau: app_commands.Choice[str]
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            return
+        await asyncio.to_thread(
+            set_level, _app(self.bot).database, guild.id, niveau.value, _stamp()
+        )
+        await interaction.response.send_message(f"Spontanéité : **{niveau.name}**.", ephemeral=True)
+
+    @chatbot.command(name="personnalite", description="Consigne de ton propre au serveur")
+    @app_commands.describe(texte="Vide pour revenir à la personnalité par défaut")
+    async def personality(self, interaction: discord.Interaction, texte: str = "") -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            return
+        await asyncio.to_thread(
+            save_personality, _app(self.bot).database, guild.id, texte.strip()[:1500], _stamp()
+        )
+        done = (
+            "Personnalité du serveur enregistrée." if texte.strip() else "Personnalité par défaut."
+        )
+        await interaction.response.send_message(done, ephemeral=True)
+
+    preferences = app_commands.Group(
+        name="preferences", description="Tes réglages avec MARIA", guild_only=True
+    )
+
+    @preferences.command(name="propositions", description="MARIA te propose de retenir des faits")
+    async def proposals(self, interaction: discord.Interaction, actif: bool) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            return
+        app = _app(self.bot)
+        await asyncio.to_thread(app.memory.set_prompts, interaction.user.id, guild.id, actif)
+        state = "activées" if actif else "désactivées"
+        await interaction.response.send_message(f"Propositions **{state}**.", ephemeral=True)
+
+    @preferences.command(name="reactions", description="Réactions spontanées sur tes messages")
+    @app_commands.choices(niveau=[*_LEVELS, app_commands.Choice(name="Comme le serveur", value="")])
+    async def reactions(
+        self, interaction: discord.Interaction, niveau: app_commands.Choice[str]
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            return
+        chosen = niveau.value if niveau.value in LEVELS else None
+        await asyncio.to_thread(
+            set_member_level, _app(self.bot).database, guild.id, interaction.user.id, chosen
+        )
+        await interaction.response.send_message(f"Réactions : **{niveau.name}**.", ephemeral=True)
+
 
 def _place(
     interaction: discord.Interaction,
@@ -137,7 +219,10 @@ async def _toggle(
 
 def _snapshot(app: App, guild_id: int, channel_id: int) -> str:
     guild = app.database.fetchone(
-        "SELECT mode, spontaneity FROM guild_settings WHERE guild_id = ?",
+        """
+        SELECT mode, spontaneity, python_blocked, personality
+        FROM guild_settings WHERE guild_id = ?
+        """,
         (guild_id,),
     )
     channel = app.database.fetchone(
@@ -151,13 +236,18 @@ def _snapshot(app: App, guild_id: int, channel_id: int) -> str:
     spontaneity = "normal" if guild is None else str(guild["spontaneity"] or "normal")
     everyone = "oui" if channel is not None and channel["respond_everyone"] else "non"
     transcribe = "oui" if channel is not None and channel["auto_transcribe"] else "non"
+    python = "non" if guild is not None and guild["python_blocked"] else "oui"
+    personality = "propre au serveur" if guild is not None and guild["personality"] else "défaut"
     history = app.conversation.transcript(channel_id)
     return (
         f"Mode : {mode}\n"
         f"Spontanéité : {spontaneity}\n"
         f"@everyone : {everyone}\n"
         f"Vocaux transcrits : {transcribe}\n"
-        f"Messages en mémoire dans ce salon : {len(history)}"
+        f"run_python : {python}\n"
+        f"Personnalité : {personality}\n"
+        f"Messages en mémoire dans ce salon : {len(history)}\n"
+        f"Outils : {', '.join(app.capabilities.names())}"
     )
 
 

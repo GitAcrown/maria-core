@@ -30,6 +30,7 @@ class Objective:
     state: Mapping[str, Any]
     version: int
     last_error: str
+    origin_message_id: int | None = None
 
     def __post_init__(self) -> None:
         if self.status not in _STATUSES:

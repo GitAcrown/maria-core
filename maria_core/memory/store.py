@@ -1,11 +1,17 @@
 """SQLite et FTS5. Une proposition n'est pas un souvenir tant qu'elle n'est pas acceptée."""
 
-import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from maria_core.db import Database
 from maria_core.memory.model import Memory, Proposal
 from maria_core.memory.policy import Actor, denial
+from maria_core.memory.rows import (
+    accepted_subject,
+    memory_row,
+    parse_time,
+    proposal_row,
+    visible,
+)
 from maria_core.memory.text import close, match_query, normalize
 from maria_core.vectors.index import VectorIndex
 
@@ -33,8 +39,10 @@ class MemoryStore:
         content: str,
         source: str,
         now: datetime,
+        own: bool = False,
     ) -> Memory:
-        refused = denial(actor, scope, subject_id)
+        """`own` : un goût que MARIA se forme elle-même, sans attendre son propriétaire."""
+        refused = "" if own and scope == "self" else denial(actor, scope, subject_id)
         if refused:
             raise MemoryDenied(refused)
         text = content.strip()
@@ -46,6 +54,18 @@ class MemoryStore:
         if normalize(current.content) == normalize(text):
             return current
         return self._rewrite(current, text, actor.user_id, "mise à jour", now)
+
+    def correct(self, actor: Actor, memory_id: int, content: str, now: datetime) -> Memory:
+        """Remplace le texte d'un souvenir existant, avec une révision."""
+        current = self.get(memory_id)
+        if current is None or current.deleted_at is not None:
+            raise ValueError("Souvenir introuvable.")
+        if denial(actor, current.scope, current.subject_id):
+            raise MemoryDenied("Tu ne peux pas modifier ce souvenir.")
+        text = content.strip()
+        if not text:
+            raise ValueError("Souvenir vide.")
+        return self._rewrite(current, text, actor.user_id, "correction", now)
 
     def forget(self, actor: Actor, memory_id: int, now: datetime) -> bool:
         current = self.get(memory_id)
@@ -77,7 +97,7 @@ class MemoryStore:
         row = self._database.fetchone("SELECT * FROM memories WHERE id = ?", (memory_id,))
         if row is None:
             return None
-        return _memory(row)
+        return memory_row(row)
 
     def search(
         self,
@@ -96,14 +116,17 @@ class MemoryStore:
             SELECT memories.* FROM memories
             JOIN memories_fts ON memories.id = memories_fts.rowid
             WHERE memories_fts MATCH ? AND memories.deleted_at IS NULL
-            LIMIT 20
+            ORDER BY bm25(memories_fts)
+            LIMIT 40
             """,
             (match,),
         )
-        visible = [
-            _memory(row) for row in rows if _visible(_memory(row), user_id, guild_id, mentioned)
+        shown = [
+            memory_row(row)
+            for row in rows
+            if visible(memory_row(row), user_id, guild_id, mentioned)
         ]
-        return tuple(visible[:limit])
+        return tuple(shown[:limit])
 
     def profile(self, user_id: int, *, limit: int = 3) -> tuple[Memory, ...]:
         rows = self._database.fetchall(
@@ -115,7 +138,19 @@ class MemoryStore:
             """,
             (user_id, limit),
         )
-        return tuple(_memory(row) for row in rows)
+        return tuple(memory_row(row) for row in rows)
+
+    def list_self(self, limit: int = 6) -> tuple[Memory, ...]:
+        rows = self._database.fetchall(
+            """
+            SELECT * FROM memories
+            WHERE deleted_at IS NULL AND scope = 'self'
+            ORDER BY COALESCE(last_used_at, updated_at) DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return tuple(memory_row(row) for row in rows)
 
     def list_for(self, user_id: int) -> tuple[Memory, ...]:
         return self.profile(user_id, limit=20)
@@ -129,7 +164,7 @@ class MemoryStore:
             """,
             (guild_id,),
         )
-        return tuple(_memory(row) for row in rows)
+        return tuple(memory_row(row) for row in rows)
 
     def mark_used(self, memory_ids: tuple[int, ...], now: datetime) -> None:
         for memory_id in memory_ids:
@@ -180,7 +215,7 @@ class MemoryStore:
             "SELECT * FROM memory_proposals WHERE id = ?",
             (proposal_id,),
         )
-        return None if row is None else _proposal(row)
+        return None if row is None else proposal_row(row)
 
     def open_for(self, user_id: int) -> tuple[Proposal, ...]:
         rows = self._database.fetchall(
@@ -191,11 +226,29 @@ class MemoryStore:
             """,
             (user_id,),
         )
-        return tuple(_proposal(row) for row in rows)
+        return tuple(proposal_row(row) for row in rows)
+
+    def open_guild(self, guild_id: int) -> tuple[Proposal, ...]:
+        """Propositions de souvenir du serveur, à valider par un modérateur."""
+        rows = self._database.fetchall(
+            """
+            SELECT * FROM memory_proposals
+            WHERE status = 'open' AND scope = 'guild' AND guild_id = ?
+            ORDER BY created_at DESC LIMIT 10
+            """,
+            (guild_id,),
+        )
+        return tuple(proposal_row(row) for row in rows)
 
     def accept(self, proposal_id: int, actor: Actor, now: datetime) -> Memory:
         proposal = self._open_owned(proposal_id, actor)
-        subject = _accepted_subject(proposal, actor)
+        if proposal.review_of is not None:
+            current = self.get(proposal.review_of)
+            if current is not None and current.deleted_at is None:
+                self._resolve(proposal_id, "accepted", now, current.id)
+                self.mark_used((current.id,), now)
+                return current
+        subject = accepted_subject(proposal, actor)
         memory = self.remember(
             actor,
             scope=proposal.scope,
@@ -209,12 +262,19 @@ class MemoryStore:
         return memory
 
     def ignore(self, proposal_id: int, actor: Actor, now: datetime) -> None:
-        self._open_owned(proposal_id, actor)
-        self._resolve(proposal_id, "ignored", now, None)
+        """Ignorer une révision efface le souvenir revu ; ignorer une proposition l'écarte."""
+        proposal = self._open_owned(proposal_id, actor)
+        if proposal.review_of is not None:
+            self.forget(actor, proposal.review_of, now)
+        self._resolve(proposal_id, "ignored", now, proposal.review_of)
 
     def confirm_repeat(self, actor: Actor, text: str, now: datetime) -> bool:
         for proposal in self.open_for(actor.user_id):
-            if proposal.scope == "user" and close(proposal.content, text):
+            if (
+                proposal.review_of is None
+                and proposal.scope == "user"
+                and close(proposal.content, text)
+            ):
                 self.accept(proposal.id, actor, now)
                 return True
         return False
@@ -223,14 +283,14 @@ class MemoryStore:
         row = self._database.fetchone(
             """
             SELECT created_at FROM memory_proposals
-            WHERE subject_user_id = ? AND status = 'open'
+            WHERE subject_user_id = ? AND status = 'open' AND source_message_id IS NOT NULL
             ORDER BY created_at DESC LIMIT 1
             """,
             (user_id,),
         )
         if row is None:
             return False
-        created = _time(row["created_at"])
+        created = parse_time(row["created_at"])
         return created is not None and now - created < _ASK_GAP
 
     def attach_reply(self, proposal_id: int, message_id: int) -> None:
@@ -247,7 +307,7 @@ class MemoryStore:
             ORDER BY created_at DESC LIMIT 30
             """
         )
-        return tuple(_proposal(row) for row in rows)
+        return tuple(proposal_row(row) for row in rows)
 
     def maintain(self, now: datetime) -> None:
         limit = (now - timedelta(days=PROPOSAL_DAYS)).isoformat()
@@ -294,18 +354,23 @@ class MemoryStore:
         )
         created = 0
         for row in rows:
-            memory = _memory(row)
-            if self._pending_same(memory):
+            memory = memory_row(row)
+            if memory.scope != "user" or self._pending_same(memory):
                 continue
-            self.propose(
+            proposal = self.propose(
                 scope=memory.scope,
                 content=memory.content,
-                subject_user_id=memory.subject_id if memory.scope == "user" else None,
+                subject_user_id=memory.subject_id,
                 guild_id=memory.guild_id,
                 channel_id=None,
                 source_message_id=None,
                 now=now,
             )
+            self._database.execute(
+                "UPDATE memory_proposals SET memory_id = ? WHERE id = ?",
+                (memory.id, proposal.id),
+            )
+            self.mark_used((memory.id,), now)
             created += 1
         return created
 
@@ -325,7 +390,7 @@ class MemoryStore:
             (scope, subject_id, guild_id, guild_id),
         )
         for row in rows:
-            memory = _memory(row)
+            memory = memory_row(row)
             if close(memory.content, text):
                 return memory
         return None
@@ -422,70 +487,3 @@ class MemoryStore:
             (memory.scope, memory.content),
         )
         return bool(rows)
-
-
-def _accepted_subject(proposal: Proposal, actor: Actor) -> int:
-    if proposal.scope == "guild":
-        return proposal.guild_id or 0
-    if proposal.scope == "self":
-        return 0
-    return proposal.subject_user_id or actor.user_id
-
-
-def _visible(
-    memory: Memory, user_id: int, guild_id: int | None, mentioned: tuple[int, ...]
-) -> bool:
-    if memory.scope == "self":
-        return True
-    if memory.scope == "guild":
-        return guild_id is not None and memory.guild_id == guild_id
-    allowed = {user_id, *mentioned}
-    return memory.scope == "user" and memory.subject_id in allowed
-
-
-def _memory(row: sqlite3.Row) -> Memory:
-    return Memory(
-        id=int(row["id"]),
-        scope=str(row["scope"]),
-        subject_id=int(row["subject_id"]),
-        guild_id=int(row["guild_id"]) if row["guild_id"] is not None else None,
-        content=str(row["content"]),
-        source=str(row["source"]),
-        created_by=int(row["created_by"]),
-        created_at=_required(row["created_at"]),
-        updated_at=_required(row["updated_at"]),
-        last_used_at=_time(row["last_used_at"]),
-        deleted_at=_time(row["deleted_at"]),
-    )
-
-
-def _proposal(row: sqlite3.Row) -> Proposal:
-    return Proposal(
-        id=int(row["id"]),
-        guild_id=int(row["guild_id"]) if row["guild_id"] is not None else None,
-        channel_id=int(row["channel_id"]) if row["channel_id"] is not None else None,
-        subject_user_id=int(row["subject_user_id"]) if row["subject_user_id"] is not None else None,
-        scope=str(row["scope"]),
-        content=str(row["content"]),
-        status=str(row["status"]),
-        created_at=_required(row["created_at"]),
-        reply_message_id=int(row["reply_message_id"])
-        if row["reply_message_id"] is not None
-        else None,
-    )
-
-
-def _required(raw: object) -> datetime:
-    parsed = _time(raw)
-    if parsed is None:
-        raise ValueError("Date de souvenir manquante.")
-    return parsed
-
-
-def _time(raw: object) -> datetime | None:
-    if not raw:
-        return None
-    moment = datetime.fromisoformat(str(raw))
-    if moment.tzinfo is None:
-        return moment.replace(tzinfo=UTC)
-    return moment

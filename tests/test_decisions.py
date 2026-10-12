@@ -149,7 +149,7 @@ async def test_obvious_address_stays_on_the_rule(tmp_path: Path) -> None:
     address = next(item for item in builtin_decisions() if item.name == "addressed_to_bot")
     assert address.fallback == "ignore"
     names = [item.name for item in builtin_decisions()]
-    assert len(names) == len(set(names)) == 13
+    assert len(names) == len(set(names)) == 12
     database.close()
 
 

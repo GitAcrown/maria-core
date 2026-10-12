@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 from maria_core.db import Database
 from maria_core.objectives.catalog import register_builtin_kinds
 from maria_core.objectives.matcher import Matcher
-from maria_core.objectives.runner import Fetcher, Judge, Runner, Writer
+from maria_core.objectives.pipeline import Fetcher, Judge, Writer
+from maria_core.objectives.runner import Runner
 from maria_core.objectives.scheduler import Scheduler
 from maria_core.objectives.signals import ObjectiveSignal
 from maria_core.objectives.store import ObjectiveStore
@@ -41,6 +42,10 @@ class Objectives:
         )
         self.matcher = Matcher(self.store, self.runner)
         self.scheduler = Scheduler(self.store, self.runner, clock=self._clock)
+
+    @property
+    def pipeline(self):
+        return self.runner.pipeline
 
     def now(self) -> datetime:
         return self._clock()

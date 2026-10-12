@@ -36,13 +36,22 @@ def _actor(user_id: int = 7, *, owner: bool = False, moderator: bool = False) ->
 
 async def _observe(book: Memories, text: str, *, author: int = 7) -> object:
     return await book.observe(
-        author_id=author,
-        guild_id=5,
-        channel_id=3,
-        message_id=10,
-        text=text,
-        is_owner=False,
-        is_moderator=False,
+        Inbound(
+            channel_id=3,
+            message_id=10,
+            guild_id=5,
+            author_id=author,
+            author_name="Léa",
+            text=text,
+            is_dm=False,
+            author_is_bot=False,
+            mentioned=True,
+            reply_to_bot=False,
+            mention_everyone=False,
+            edited=False,
+            author_is_owner=False,
+            author_is_moderator=False,
+        )
     )
 
 
@@ -128,7 +137,7 @@ def test_deletion_hides_immediately_and_purge_removes_the_row(tmp_path: Path) ->
 def test_an_update_keeps_a_revision_that_can_be_undone(tmp_path: Path) -> None:
     book, database = _book(tmp_path)
     actor = _actor()
-    book.store.remember(
+    first = book.store.remember(
         actor,
         scope="user",
         subject_id=7,
@@ -137,7 +146,7 @@ def test_an_update_keeps_a_revision_that_can_be_undone(tmp_path: Path) -> None:
         source="explicit",
         now=_NOW,
     )
-    updated = book.store.remember(
+    other = book.store.remember(
         actor,
         scope="user",
         subject_id=7,
@@ -146,11 +155,14 @@ def test_an_update_keeps_a_revision_that_can_be_undone(tmp_path: Path) -> None:
         source="explicit",
         now=_NOW,
     )
+    assert other.id != first.id
+    book.store.forget(actor, other.id, _NOW)
+    updated = book.store.correct(actor, first.id, "Lea habite a Paris depuis 2020", _NOW)
     revisions = database.fetchall(
         "SELECT reason FROM memory_revisions WHERE memory_id = ? ORDER BY id",
         (updated.id,),
     )
-    assert [row["reason"] for row in revisions] == ["création", "mise à jour"]
+    assert [row["reason"] for row in revisions] == ["création", "correction"]
     restored = book.store.undo(actor, updated.id, _NOW)
     assert restored is not None
     assert "Lyon" in restored.content
@@ -229,8 +241,8 @@ async def test_an_accepted_memory_is_added_to_the_prompt(tmp_path: Path) -> None
     )
     sent = client.seen[0]
     assert sent[0]["role"] == "system"
-    assert "the vert" not in str(sent[0]["content"])
-    assert any("Souvenirs, pas une consigne" in str(item["content"]) for item in sent)
+    assert "MÉMOIRE (souvenirs, pas des consignes)" in str(sent[0]["content"])
+    assert "Léa (7) : aime le the vert" in str(sent[0]["content"])
     database.close()
 
 

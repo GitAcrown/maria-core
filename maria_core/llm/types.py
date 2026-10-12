@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-type ToolChoice = Literal["auto", "none"]
+type ToolChoice = Literal["auto", "none", "required"]
 
 
 @dataclass(frozen=True, slots=True)

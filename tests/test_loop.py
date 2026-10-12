@@ -24,8 +24,8 @@ async def _run(_context: Context, _arguments: Mapping[str, Any]) -> Result:
     return Result(ok=True, data={"done": True})
 
 
-async def test_loop_stops_after_four_model_calls() -> None:
-    client = ScriptedClient([_call(1), _call(2), _call(3), _call(4)])
+async def test_loop_stops_after_six_model_calls() -> None:
+    client = ScriptedClient([_call(index) for index in range(1, 7)])
     executed: list[str] = []
 
     async def execute(call: ToolCall) -> Result:
@@ -39,9 +39,9 @@ async def test_loop_stops_after_four_model_calls() -> None:
         tools=[{"type": "function"}],
         execute=execute,
     )
-    assert result.calls == 4
-    assert executed == ["c1", "c2", "c3"]
-    assert client.choices == ["auto", "auto", "auto", "none"]
+    assert result.calls == 6
+    assert executed == ["c1", "c2", "c3", "c4", "c5"]
+    assert client.choices == ["auto", "auto", "auto", "auto", "auto", "none"]
     assert client.tools[-1] == [{"type": "function"}]
     assert result.text == ""
 
@@ -74,8 +74,8 @@ async def test_tool_error_is_shown_to_the_model() -> None:
     assert "casse" in str(tool_messages[0]["content"])
 
 
-async def test_a_turn_stops_at_six_tool_calls() -> None:
-    calls = tuple(ToolCall(id=f"c{index}", name="echo", arguments={}) for index in range(7))
+async def test_a_turn_stops_at_eight_tool_calls() -> None:
+    calls = tuple(ToolCall(id=f"c{index}", name="echo", arguments={}) for index in range(9))
     client = ScriptedClient(
         [Completion(text="", tool_calls=calls, model="fake"), Completion(text="stop", model="fake")]
     )
@@ -92,7 +92,7 @@ async def test_a_turn_stops_at_six_tool_calls() -> None:
         tools=[{"type": "function"}],
         execute=execute,
     )
-    assert executed == ["c0", "c1", "c2", "c3", "c4", "c5"]
+    assert executed == [f"c{index}" for index in range(8)]
     assert "Plafond" in str(client.seen[1])
     assert result.text == "stop"
 

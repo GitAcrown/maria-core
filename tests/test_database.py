@@ -26,17 +26,20 @@ def test_first_migration_creates_the_schema_without_a_backup(
     database: Database, tmp_path: Path
 ) -> None:
     assert database.migrate() == ()
-    assert database.version == 8
+    assert database.version == 11
     backups = sorted(path.name for path in (tmp_path / "backups").glob("*.db"))
-    assert [name.split("-")[1] for name in backups] == ["v1", "v2", "v3", "v4", "v5", "v6", "v7"]
+    versions = sorted(int(name.split("-")[1][1:]) for name in backups)
+    assert versions == list(range(1, 11))
     tables = {row["name"] for row in database.fetchall("SELECT name FROM sqlite_master")}
     assert "bookmarks" not in tables
+    assert "widget_tabs" not in tables
     assert {
         "objectives",
         "memories",
         "decision_log",
         "llm_calls",
-        "widget_tabs",
+        "emoji_words",
+        "objective_fetches",
         "polls",
         "capability_calls",
     } <= tables

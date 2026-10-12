@@ -10,6 +10,7 @@ from maria_core.config import Settings
 from maria_core.db import Database
 from maria_core.llm.types import ToolCall
 from maria_core.objectives.model import StaleObjective
+from maria_core.objectives.pipeline import Delivery, Written
 from maria_core.objectives.price import extract_price
 from maria_core.objectives.quota import MAX_OPEN
 from maria_core.objectives.runtime import Objectives
@@ -23,13 +24,15 @@ _PARIS = ZoneInfo("Europe/Paris")
 class _Courier:
     def __init__(self, *, fail: bool = False) -> None:
         self.sent: list[str] = []
+        self.deliveries: list[Delivery] = []
         self.notices: list[str] = []
         self.fail = fail
 
-    async def send(self, _objective: object, text: str) -> None:
+    async def send(self, _objective: object, delivery: Delivery) -> None:
         if self.fail:
             raise RuntimeError("canal coupé")
-        self.sent.append(text)
+        self.sent.append(delivery.text)
+        self.deliveries.append(delivery)
 
     async def notify(self, _objective: object, text: str) -> None:
         self.notices.append(text)
@@ -41,15 +44,20 @@ def _open(
     database = Database(tmp_path / "maria.db")
     database.migrate()
     courier = _Courier()
-    service = Objectives(
-        database, clock=lambda: clock[0], fetcher=fetcher, writer=lambda prompt: _ready(prompt)
-    )
+    service = Objectives(database, clock=lambda: clock[0], fetcher=fetcher, writer=_Writer())
     service.runner.courier = courier
     return service, database, courier
 
 
-async def _ready(prompt: str) -> str:
-    return f"rédigé : {prompt}"
+class _Writer:
+    async def write(
+        self,
+        _objective: object,
+        instruction: str,
+        _evidence: str,
+        _runs: tuple[tuple[str, str], ...],
+    ) -> Written:
+        return Written(f"rédigé : {instruction}")
 
 
 def _due(service: Objectives, *, title: str = "Boire", text: str = "bois de l'eau") -> int:
@@ -166,8 +174,10 @@ async def test_the_same_message_fires_an_event_objective_once(tmp_path: Path) ->
         text="le métro est bloqué",
     )
     assert await service.matcher.handle(signal, now=clock[0]) == 1
-    assert await service.matcher.handle(signal, now=clock[0]) == 1
-    assert courier.sent == ["j'ai vu le métro"]
+    assert await service.matcher.handle(signal, now=clock[0]) == 0
+    assert courier.sent[0].startswith("j'ai vu le métro")
+    assert len(courier.sent) == 1
+    assert "le métro est bloqué" in courier.sent[0]
     database.close()
 
 
@@ -191,6 +201,7 @@ async def test_a_late_reminder_is_sent_and_an_old_one_is_marked_missed(tmp_path:
     assert claimed.id == recent.id
     assert await service.runner.execute(claimed) == "sent"
     assert courier.sent == ["encore temps"]
+    assert courier.deliveries[0].footer == "**Rappel**"
 
     old, _created = service.store.create(
         owner_id=7,
@@ -283,14 +294,27 @@ async def test_creating_the_same_objective_returns_the_existing_one(tmp_path: Pa
         guild_id=5,
         channel_ids=(3,),
         deliver="channel",
-        title="  boire ",
+        title="Autre titre",
         trigger={"type": "daily", "time": "09:00"},
         condition=None,
-        action={"type": "remind", "text": "autre"},
+        action={"type": "remind", "text": "bois de l'eau"},
         now=clock[0],
     )
     assert created is False
     assert again.id == 1
+    other, created = service.store.create(
+        owner_id=7,
+        guild_id=5,
+        channel_ids=(3,),
+        deliver="channel",
+        title="Boire",
+        trigger={"type": "daily", "time": "20:00"},
+        condition=None,
+        action={"type": "remind", "text": "bois de l'eau"},
+        now=clock[0],
+    )
+    assert created is True
+    assert other.id == 2
     database.close()
 
 
@@ -375,7 +399,8 @@ async def test_fetch_sends_only_when_the_price_is_under_the_threshold(tmp_path: 
     claimed = service.store.claim(clock[0])
     assert claimed is not None
     assert await service.runner.execute(claimed) == "sent"
-    assert courier.sent == ["tombé à 9.90"]
+    assert courier.sent[0].startswith("tombé à 9.90")
+    assert "<https://shop.test/p>" in courier.sent[0]
     database.close()
 
 
@@ -399,13 +424,13 @@ async def test_web_budget_postpones_a_fetch(tmp_path: Path) -> None:
         action={"type": "fetch_then", "url": "https://shop.test", "text": "vu"},
         now=clock[0] - timedelta(hours=2),
     )
-    for index in range(40):
+    for _ in range(40):
         database.execute(
             """
-            INSERT INTO objective_runs (objective_id, activation_key, started_at, outcome)
-            VALUES (1, ?, ?, 'sent')
+            INSERT INTO objective_fetches (at, objective_id, budget_key)
+            VALUES (?, 1, 'user:7')
             """,
-            (f"past-{index}", clock[0].isoformat()),
+            (clock[0].isoformat(),),
         )
     claimed = service.store.claim(clock[0])
     assert claimed is not None

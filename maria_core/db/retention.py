@@ -37,6 +37,10 @@ def purge(database: Database, now: datetime) -> dict[str, int]:
             "DELETE FROM social_budget WHERE hour_key < ?",
             (now - timedelta(hours=_BUDGET_HOURS)).strftime("%Y-%m-%dT%H"),
         ),
+        "objective_fetches": (
+            "DELETE FROM objective_fetches WHERE at < ?",
+            before(days=3),
+        ),
         "objective_runs": (
             "DELETE FROM objective_runs WHERE finished_at IS NOT NULL AND finished_at < ?",
             before(days=_RUN_DAYS),

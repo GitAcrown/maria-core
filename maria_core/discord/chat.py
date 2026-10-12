@@ -7,33 +7,39 @@ import discord
 from discord.ext import commands
 
 from maria_core.app import App
-from maria_core.conversation import ConversationService
 from maria_core.conversation.model import Inbound, Reply
 from maria_core.discord.inbound import inbound_from_message
+from maria_core.discord.layout import build_views, quiet_links
 from maria_core.discord.memory_view import ProposalView
-from maria_core.discord.tabs import TabView
+from maria_core.discord.objectives import ConfirmView
+from maria_core.discord.voice import prepare_voice
 from maria_core.objectives.signals import ObjectiveSignal
 
 logger = logging.getLogger(__name__)
 
+SILENT = discord.AllowedMentions.none()
+_LIMIT = 2000
+
 
 class ChatCog(commands.Cog):
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: commands.Bot, app: App) -> None:
         self.bot = bot
+        self.app = app
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
         await self._guard(message, edited=False)
 
     @commands.Cog.listener()
-    async def on_message_edit(
-        self,
-        before: discord.Message,
-        after: discord.Message,
-    ) -> None:
+    async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
         if (before.content or "") == (after.content or ""):
             return
         await self._guard(after, edited=True)
+
+    @commands.Cog.listener()
+    async def on_typing(self, channel: object, user: discord.abc.User, _when: object) -> None:
+        if not getattr(user, "bot", False) and hasattr(channel, "id"):
+            self.app.social.typing(int(getattr(channel, "id", 0)), user.id)
 
     async def _guard(self, message: discord.Message, *, edited: bool) -> None:
         try:
@@ -46,115 +52,156 @@ class ChatCog(commands.Cog):
         if inbound is None:
             return
         if not edited:
-            await _publish_signal(self.bot, inbound)
-        reply = await _service(self.bot).handle(inbound, thinking=message.channel.typing)
-        if reply is None:
-            return
-        await self._publish(message, reply)
+            _publish_signal(self.app, inbound, message.jump_url)
+            inbound = await prepare_voice(self.app, message, inbound)
+        reply = await self.app.conversation.handle(inbound, thinking=message.channel.typing)
+        if reply is not None:
+            await self._publish(message, reply)
 
     async def _publish(self, message: discord.Message, reply: Reply) -> None:
-        if reply.edit_message_id is not None and len(reply.chunks) == 1:
-            edited = await _try_edit(message, reply)
-            if edited:
-                return
-        view, tab_id = await _tab_view(self.bot, message.channel.id, reply)
-        if reply.proposal_id is not None:
-            view, tab_id = ProposalView(reply.proposal_id), None
-        first, last = await _send_chunks(message, reply, view)
+        if reply.edit_message_id is not None and await _try_edit(message, reply):
+            return
+        anchor = _anchor(message, reply)
+        extra = _extra_view(reply)
+        if reply.cards:
+            first, last = await _send_views(message.channel, reply, anchor)
+            if extra is not None:
+                last = await _send_extra(message.channel, extra) or last
+        else:
+            first, last = await _send_chunks(message.channel, reply, anchor, extra)
         if first is not None:
-            _service(self.bot).remember_reply(reply.user_message_id, first)
-        if tab_id is not None and last is not None:
-            await asyncio.to_thread(self.bot.app.tabs.attach, tab_id, last)
+            self.app.conversation.remember_reply(reply.user_message_id, first)
         if reply.proposal_id is not None and last is not None:
-            await asyncio.to_thread(
-                self.bot.app.memory.store.attach_reply,
-                reply.proposal_id,
-                last,
+            await _attach(self.app, reply.proposal_id, last)
+
+
+async def _send_views(
+    channel: discord.abc.Messageable,
+    reply: Reply,
+    anchor: discord.MessageReference | None,
+) -> tuple[int | None, int | None]:
+    first: int | None = None
+    last: int | None = None
+    for index, view in enumerate(
+        build_views(intro=reply.text, cards=reply.cards, outro=reply.footer)
+    ):
+        try:
+            sent = await channel.send(
+                view=view, reference=anchor if index == 0 else None, allowed_mentions=SILENT
             )
+        except discord.HTTPException as exc:
+            logger.warning("Vue refusée par Discord (%s), repli en texte", exc.status)
+            return await _fallback_text(channel, reply, anchor)
+        first = first or sent.id
+        last = sent.id
+    return first, last
+
+
+async def _fallback_text(
+    channel: discord.abc.Messageable, reply: Reply, anchor: discord.MessageReference | None
+) -> tuple[int | None, int | None]:
+    body = "\n\n".join([reply.text, *(card.as_text() for card in reply.cards)]).strip()
+    fallback = Reply(
+        chunks=(body[:_LIMIT],),
+        user_message_id=reply.user_message_id,
+        edit_message_id=None,
+        reply=reply.reply,
+        footer=reply.footer,
+    )
+    return await _send_chunks(channel, fallback, anchor, None)
+
+
+async def _send_chunks(
+    channel: discord.abc.Messageable,
+    reply: Reply,
+    anchor: discord.MessageReference | None,
+    view: discord.ui.View | None,
+) -> tuple[int | None, int | None]:
+    chunks = [quiet_links(chunk) for chunk in reply.chunks]
+    if reply.footer:
+        if chunks and len(chunks[-1]) + len(reply.footer) + 1 <= _LIMIT:
+            chunks[-1] = f"{chunks[-1]}\n{quiet_links(reply.footer)}"
+        else:
+            chunks.append(quiet_links(reply.footer))
+    first: int | None = None
+    last: int | None = None
+    final = len(chunks) - 1
+    for index, chunk in enumerate(chunks):
+        try:
+            kwargs: dict[str, object] = {"reference": anchor if index == 0 else None}
+            if view is not None and index == final:
+                kwargs["view"] = view
+            sent = await channel.send(chunk, allowed_mentions=SILENT, **kwargs)
+        except discord.HTTPException:
+            logger.warning("Envoi refusé dans le salon %s", getattr(channel, "id", "?"))
+            return first, last
+        first = first or sent.id
+        last = sent.id
+    return first, last
+
+
+async def _send_extra(channel: discord.abc.Messageable, view: discord.ui.View) -> int | None:
+    try:
+        sent = await channel.send("-# Confirmer ?", view=view, allowed_mentions=SILENT)
+    except discord.HTTPException:
+        return None
+    return sent.id
 
 
 async def _try_edit(message: discord.Message, reply: Reply) -> bool:
-    if reply.edit_message_id is None:
+    """Réédite la réponse seulement si elle est encore le dernier message du salon."""
+    if reply.edit_message_id is None or reply.cards or len(reply.chunks) != 1:
         return False
+    if getattr(message.channel, "last_message_id", None) != reply.edit_message_id:
+        return False
+    body = quiet_links(f"{reply.chunks[0]}\n{reply.footer}".strip())
     try:
         existing = await message.channel.fetch_message(reply.edit_message_id)
-        await existing.edit(content=reply.chunks[0])
+        await existing.edit(content=body[:_LIMIT], allowed_mentions=SILENT)
     except discord.HTTPException:
         logger.warning("Réponse %s impossible à modifier", reply.edit_message_id)
         return False
     return True
 
 
-async def _send_chunks(
-    message: discord.Message,
-    reply: Reply,
-    view: discord.ui.View | None,
-) -> tuple[int | None, int | None]:
-    """`message` peut être plus ancien que celui auquel on répond après une rafale."""
-    anchor = _anchor(message, reply)
-    first: int | None = None
-    last: int | None = None
-    final = len(reply.chunks) - 1
-    for index, chunk in enumerate(reply.chunks):
-        try:
-            sent = await message.channel.send(
-                chunk,
-                reference=anchor if index == 0 else None,
-                view=view if index == final else None,
-            )
-        except discord.HTTPException:
-            logger.warning("Envoi refusé dans le salon %s", message.channel.id)
-            return first, last
-        if first is None:
-            first = sent.id
-        last = sent.id
-    return first, last
+def _extra_view(reply: Reply) -> discord.ui.View | None:
+    if reply.draft_objective_id is not None:
+        return ConfirmView(reply.draft_objective_id)
+    if reply.proposal_id is not None:
+        return ProposalView(reply.proposal_id)
+    return None
 
 
-async def _tab_view(
-    bot: commands.Bot,
-    channel_id: int,
-    reply: Reply,
-) -> tuple[discord.ui.View | None, str | None]:
-    if not reply.tabs:
-        return None, None
-    app = getattr(bot, "app", None)
-    if not isinstance(app, App):
-        return None, None
-    saved = await asyncio.to_thread(app.tabs.save, channel_id, reply.tabs)
-    return TabView(app.tabs, saved), saved.id
+async def _attach(app: App, proposal_id: int, message_id: int) -> None:
+    await asyncio.to_thread(app.memory.store.attach_reply, proposal_id, message_id)
 
 
 def _anchor(message: discord.Message, reply: Reply) -> discord.MessageReference | None:
-    if not reply.reply:
+    if not reply.reply or message.guild is None:
+        return None
+    if getattr(message.channel, "last_message_id", None) == reply.user_message_id:
         return None
     return discord.MessageReference(
         message_id=reply.user_message_id,
         channel_id=message.channel.id,
-        guild_id=message.guild.id if message.guild else None,
+        guild_id=message.guild.id,
         fail_if_not_exists=False,
     )
 
 
-async def _publish_signal(bot: commands.Bot, inbound: Inbound) -> None:
-    app = getattr(bot, "app", None)
-    if not isinstance(app, App):
-        return
+def _publish_signal(app: App, inbound: Inbound, url: str) -> None:
     app.events.publish_soon(
         ObjectiveSignal(
             kind="message",
             key=f"message:{inbound.message_id}",
-            channel_id=inbound.channel_id,
+            channel_id=inbound.policy_channel_id,
             guild_id=inbound.guild_id,
             user_id=inbound.author_id,
             text=inbound.text,
             reply_to_bot=inbound.reply_to_bot,
+            author_name=inbound.author_name,
+            url=url,
+            message_id=inbound.message_id,
+            author_is_bot=inbound.author_is_bot,
         )
     )
-
-
-def _service(bot: commands.Bot) -> ConversationService:
-    app = getattr(bot, "app", None)
-    if not isinstance(app, App):
-        raise RuntimeError("Le bot n'est pas relié à une application.")
-    return app.conversation

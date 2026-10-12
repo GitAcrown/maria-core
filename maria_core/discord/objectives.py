@@ -1,33 +1,165 @@
-"""Envoie le texte d'un objectif dans le salon ou en message privé."""
+"""Envoie un objectif : ping du propriétaire, réponse à la demande d'origine, pied discret."""
+
+import asyncio
+import logging
+import re
 
 import discord
 from discord.ext import commands
 
-from maria_core.objectives.model import Objective
+from maria_core.app import App
+from maria_core.discord.layout import build_views, quiet_links
+from maria_core.objectives.model import Objective, StaleObjective
+from maria_core.objectives.pipeline import Delivery
+from maria_core.objectives.schedule import describe
+from maria_core.objectives.tools import apply
+from maria_core.ui.render import split_message
+
+logger = logging.getLogger(__name__)
+
+_MENTION = re.compile(r"<@!?\d+>\s*")
 
 
 class DiscordCourier:
     def __init__(self, bot: commands.Bot) -> None:
         self._bot = bot
 
-    async def send(self, objective: Objective, text: str) -> None:
-        destination = await self._channel(objective)
-        await destination.send(text[:2000])
+    async def send(self, objective: Objective, delivery: Delivery) -> None:
+        destination = await self._destination(objective)
+        dm = isinstance(destination, discord.User | discord.Member | discord.DMChannel)
+        origin = None if dm else await _origin(destination, delivery.reply_to)
+        body = _MENTION.sub("", delivery.text).strip()
+        if delivery.mention and not dm and origin is None:
+            body = f"<@{objective.owner_id}> {body}".strip()
+        footer = f"-# {delivery.footer}" if delivery.footer else ""
+        mentions = discord.AllowedMentions(
+            users=[discord.Object(id=objective.owner_id)],
+            roles=False,
+            everyone=False,
+            replied_user=delivery.mention,
+        )
+        sent = await _post(destination, body, footer, delivery, origin, mentions)
+        app = getattr(self._bot, "app", None)
+        if isinstance(app, App) and sent is not None and not dm:
+            app.conversation.note_posted(sent.channel.id, delivery.text)
 
     async def notify(self, objective: Objective, text: str) -> None:
         user = self._bot.get_user(objective.owner_id) or await self._bot.fetch_user(
             objective.owner_id
         )
-        await user.send(text[:2000])
+        try:
+            await user.send(
+                quiet_links(text[:1900]), allowed_mentions=discord.AllowedMentions.none()
+            )
+        except discord.HTTPException:
+            logger.warning("Message privé refusé par %s", objective.owner_id)
 
-    async def _channel(self, objective: Objective) -> discord.abc.Messageable:
+    async def _destination(self, objective: Objective) -> discord.abc.Messageable:
         if objective.deliver == "channel" and objective.channel_ids:
             found = self._bot.get_channel(objective.channel_ids[0])
             if found is None:
-                found = await self._bot.fetch_channel(objective.channel_ids[0])
+                try:
+                    found = await self._bot.fetch_channel(objective.channel_ids[0])
+                except discord.HTTPException:
+                    found = None
             if isinstance(found, discord.abc.Messageable):
                 return found
-        user = self._bot.get_user(objective.owner_id) or await self._bot.fetch_user(
+        return self._bot.get_user(objective.owner_id) or await self._bot.fetch_user(
             objective.owner_id
         )
-        return user
+
+
+class ConfirmView(discord.ui.View):
+    """Confirmer / Annuler sous un brouillon. Persistant : survit au redémarrage."""
+
+    def __init__(self, objective_id: int) -> None:
+        super().__init__(timeout=None)
+        self.objective_id = objective_id
+        confirm = discord.ui.Button(
+            label="Confirmer",
+            style=discord.ButtonStyle.success,
+            custom_id=f"maria:obj:{objective_id}:yes",
+        )
+        cancel = discord.ui.Button(
+            label="Annuler",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"maria:obj:{objective_id}:no",
+        )
+        confirm.callback = self._confirm
+        cancel.callback = self._cancel
+        self.add_item(confirm)
+        self.add_item(cancel)
+
+    async def _confirm(self, interaction: discord.Interaction) -> None:
+        await _settle(interaction, self.objective_id, "confirm")
+
+    async def _cancel(self, interaction: discord.Interaction) -> None:
+        await _settle(interaction, self.objective_id, "cancel")
+
+
+def restore_drafts(bot: commands.Bot, app: App) -> None:
+    for objective in app.objectives.store.recent_drafts():
+        if objective.origin_message_id is not None:
+            bot.add_view(ConfirmView(objective.id))
+
+
+async def _settle(interaction: discord.Interaction, objective_id: int, op: str) -> None:
+    app = getattr(interaction.client, "app", None)
+    if not isinstance(app, App):
+        return
+    objective = await asyncio.to_thread(app.objectives.store.get, objective_id)
+    if objective is None or objective.owner_id != interaction.user.id:
+        await interaction.response.send_message("Ce brouillon n'est pas le tien.", ephemeral=True)
+        return
+    try:
+        saved = await asyncio.to_thread(apply, app.objectives, objective, {"op": op})
+    except (StaleObjective, ValueError):
+        await interaction.response.send_message("Ce brouillon est déjà traité.", ephemeral=True)
+        return
+    text = (
+        f"Objectif activé : {saved.title} ({describe(saved.trigger)})."
+        if op == "confirm"
+        else "Brouillon annulé."
+    )
+    await interaction.response.edit_message(view=None)
+    await interaction.followup.send(text, ephemeral=True)
+
+
+async def _origin(
+    destination: discord.abc.Messageable, message_id: int | None
+) -> discord.Message | None:
+    if message_id is None or not hasattr(destination, "fetch_message"):
+        return None
+    try:
+        return await destination.fetch_message(message_id)
+    except discord.HTTPException:
+        return None
+
+
+async def _post(
+    destination: discord.abc.Messageable,
+    body: str,
+    footer: str,
+    delivery: Delivery,
+    origin: discord.Message | None,
+    mentions: discord.AllowedMentions,
+) -> discord.Message | None:
+    if delivery.cards:
+        views = build_views(intro=body, cards=delivery.cards, outro=footer)
+        first: discord.Message | None = None
+        for index, view in enumerate(views):
+            if index == 0 and origin is not None:
+                sent = await origin.reply(view=view, allowed_mentions=mentions)
+            else:
+                sent = await destination.send(view=view, allowed_mentions=mentions)
+            first = first or sent
+        return first
+    chunks = list(split_message(quiet_links(f"{body}\n{footer}".strip())))
+    first = None
+    for index, chunk in enumerate(chunks):
+        if index == 0 and origin is not None:
+            sent = await origin.reply(chunk, allowed_mentions=mentions)
+        else:
+            sent = await destination.send(chunk, allowed_mentions=mentions)
+        first = first or sent
+    return first

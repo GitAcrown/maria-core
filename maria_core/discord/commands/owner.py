@@ -1,7 +1,9 @@
 """Commandes réservées au propriétaire : processus, extensions, synchronisation."""
 
+import asyncio
 import logging
 import os
+import subprocess
 import sys
 from datetime import UTC, datetime
 from typing import Literal
@@ -31,6 +33,31 @@ def _uptime(bot: commands.Bot) -> str:
     hours, rest = divmod(total, 3600)
     minutes, seconds = divmod(rest, 60)
     return f"{hours} h {minutes} min {seconds} s"
+
+
+def _keys(settings: object) -> list[tuple[str, str]]:
+    names = (
+        "token",
+        "openai_api_key",
+        "typesafe_api_key",
+        "brave_api_key",
+        "tmdb_api_key",
+        "openweathermap_api_key",
+        "spotify_client_id",
+        "spotify_client_secret",
+        "prim_api_key",
+        "sncf_api_key",
+        "api_football_key",
+    )
+    return [(name.upper(), str(getattr(settings, name, "") or "")) for name in names]
+
+
+def _mask(value: str) -> str:
+    if not value:
+        return "manquante"
+    if len(value) <= 6:
+        return f"présente ({len(value)} car.)"
+    return f"présente (…{value[-4:]})"
 
 
 class OwnerCommands(commands.Cog):
@@ -65,6 +92,49 @@ class OwnerCommands(commands.Cog):
         logger.info("Redémarrage demandé par %s", ctx.author)
         await self.bot.close()
         os.execv(sys.executable, [sys.executable, *sys.argv])
+
+    @commands.command(name="shutdown")
+    @commands.is_owner()
+    async def shutdown(self, ctx: commands.Context) -> None:
+        """Arrête proprement le processus."""
+        await ctx.send("Arrêt…")
+        logger.info("Arrêt demandé par %s", ctx.author)
+        await self.bot.close()
+
+    @commands.command(name="update")
+    @commands.is_owner()
+    async def update(self, ctx: commands.Context) -> None:
+        """git pull, puis redémarrage si tout s'est bien passé."""
+        await ctx.send("Mise à jour…")
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["git", "pull", "--ff-only"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            await ctx.send(f"git pull impossible : {exc}")
+            return
+        output = (result.stdout or result.stderr or "(aucune sortie)").strip()[:1800]
+        if result.returncode != 0:
+            await ctx.send(f"Échec de git pull :\n```\n{output}\n```")
+            return
+        await ctx.send(f"Mise à jour faite :\n```\n{output}\n```\nRedémarrage…")
+        await self.bot.close()
+        os.execv(sys.executable, [sys.executable, *sys.argv])
+
+    @commands.command(name="keys")
+    @commands.is_owner()
+    async def keys(self, ctx: commands.Context) -> None:
+        """Clés de configuration présentes ou manquantes, masquées."""
+        settings = _app(self.bot).settings
+        lines = ["Clés :"]
+        for name, value in _keys(settings):
+            lines.append(f"- `{name}` : {_mask(value)}")
+        await ctx.send("\n".join(lines))
 
     @commands.group(name="plugin", invoke_without_command=True)
     @commands.is_owner()

@@ -23,6 +23,7 @@ _SETTING_FOR_KEY = {
     "SPOTIFY_CLIENT_SECRET": "spotify_client_secret",
     "PRIM_API_KEY": "prim_api_key",
     "SNCF_API_KEY": "sncf_api_key",
+    "API_FOOTBALL_KEY": "api_football_key",
 }
 
 

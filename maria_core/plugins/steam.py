@@ -7,6 +7,7 @@ from urllib.parse import quote
 from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.capabilities.http import HttpClient, HttpError, parse_json, with_query
 from maria_core.plugins import PluginHost
+from maria_core.ui.widgets import Rendered, card, heading, links, stats, text, thumbnail
 
 _SEARCH = "https://store.steampowered.com/api/storesearch/"
 _DETAILS = "https://store.steampowered.com/api/appdetails"
@@ -33,7 +34,10 @@ def game_capability(http: HttpClient) -> Capability:
 
     return Capability(
         name="search_game",
-        description="Fiche Steam : prix, description courte. Passe le nom le plus précis possible.",
+        description=(
+            "Fiche Steam d'un jeu (prix, soldes, avis, description, genres, développeur). Nom "
+            "exact ou le plus précis ; nom flou : search_web d'abord. Un appel par jeu."
+        ),
         parameters={
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -44,11 +48,26 @@ def game_capability(http: HttpClient) -> Capability:
     )
 
 
-def render_game(data: Mapping[str, Any]) -> str:
+def render_game(data: Mapping[str, Any]) -> Rendered:
     if not data.get("name"):
-        return ""
-    price = data.get("price") or "prix inconnu"
-    return f"{data['name']} — {price}\n{data.get('description', '')}".strip()
+        return Rendered()
+    pairs = [
+        ("Prix", str(data.get("price") or "inconnu")),
+        ("Remise", str(data.get("discount") or "")),
+        ("Avis", str(data.get("reviews") or "")),
+        ("Sortie", str(data.get("released") or "")),
+    ]
+    meta = " · ".join(part for part in (data.get("genres"), data.get("developer")) if part)
+    description = str(data.get("description") or "")
+    image = str(data.get("image") or "")
+    built = card(
+        heading(f"🎮 {data['name']}", meta),
+        stats(pairs),
+        thumbnail(description, image) if image else text(description),
+        links([("Page Steam", f"https://store.steampowered.com/app/{data.get('app_id')}")]),
+        accent=0x1B2838,
+    )
+    return Rendered(cards=(built,), note=f"{data['name']} : {pairs[0][1]}. {meta}")
 
 
 async def _find(http: HttpClient, query: str) -> dict[str, str] | None:
@@ -76,7 +95,18 @@ async def _details(http: HttpClient, app_id: str) -> dict[str, str]:
     if not isinstance(data, dict):
         return {"price": "", "description": ""}
     price = data.get("price_overview") if isinstance(data.get("price_overview"), dict) else {}
+    percent = int(price.get("discount_percent") or 0)
+    genres = [
+        str(item.get("description")) for item in data.get("genres") or [] if isinstance(item, dict)
+    ]
+    recommendations = (data.get("recommendations") or {}).get("total")
     return {
         "price": str(price.get("final_formatted") or ("gratuit" if data.get("is_free") else "")),
+        "discount": f"-{percent} %" if percent else "",
         "description": str(data.get("short_description") or "")[:500],
+        "image": str(data.get("header_image") or ""),
+        "genres": ", ".join(genres[:3]),
+        "developer": ", ".join(str(item) for item in (data.get("developers") or [])[:2]),
+        "released": str((data.get("release_date") or {}).get("date") or ""),
+        "reviews": f"{recommendations} recommandations" if recommendations else "",
     }

@@ -4,13 +4,15 @@ import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from maria_core.capabilities import Capability, CapabilityRegistry, Context, Result, Risk
 from maria_core.capabilities.builtin.about import about_capability
 from maria_core.capabilities.builtin.polls import poll_capability
-from maria_core.capabilities.builtin.python_tool import python_capability
+from maria_core.capabilities.builtin.python_tool import python_capability, set_python
 from maria_core.capabilities.builtin.sandbox import execute
 from maria_core.capabilities.builtin.summary import summary_capability
 from maria_core.capabilities.builtin.web import web_capabilities
@@ -25,9 +27,8 @@ from maria_core.plugins.spotify import track_capability
 from maria_core.plugins.steam import game_capability
 from maria_core.plugins.tmdb import media_capability
 from maria_core.plugins.transport import transport_capability
-from maria_core.plugins.weather import weather_capability
+from maria_core.plugins.weather import render_weather, weather_capability
 from maria_core.plugins.youtube import video_id, youtube_capability
-from maria_core.ui.tabs import TabStore
 from tests.http_fake import FakeHttp
 
 _SCHEMA = {
@@ -114,24 +115,20 @@ async def test_missing_argument_and_timeout_become_results(tmp_path: Path) -> No
     database.close()
 
 
-async def test_dangerous_tool_is_owner_only_and_guild_gated(tmp_path: Path) -> None:
+async def test_python_is_open_to_everyone_and_a_server_can_switch_it_off(
+    tmp_path: Path,
+) -> None:
     database = _database(tmp_path)
     registry = CapabilityRegistry()
     registry.register(python_capability(database))
     settings = Settings.for_tests(tmp_path)
     call = ToolCall(id="1", name="run_python", arguments={"code": "1 + 1"})
-    refused = await invoke(registry, settings, _context(owner=False), call)
-    assert "propriétaire" in refused.error
-    database.execute(
-        "INSERT INTO guild_settings (guild_id, python_enabled, updated_at) VALUES (5, 0, ?)",
-        ("2026-10-11T00:00:00+00:00",),
-    )
-    disabled = await invoke(registry, settings, _context(owner=True), call)
-    assert "désactivé" in disabled.error
-    database.execute("UPDATE guild_settings SET python_enabled = 1 WHERE guild_id = 5")
-    allowed = await invoke(registry, settings, _context(owner=True), call)
+    allowed = await invoke(registry, settings, _context(owner=False), call)
     assert allowed.ok is True
     assert allowed.data["result"] == 2
+    set_python(database, 5, False, "2026-10-11T00:00:00+00:00")
+    disabled = await invoke(registry, settings, _context(owner=True), call)
+    assert "désactivé" in disabled.error
     database.close()
 
 
@@ -207,11 +204,14 @@ async def test_summary_uses_the_transcript_and_a_focus() -> None:
         lambda _channel: ("Léa: on mange des pâtes", "Noé: le bus est en retard"),
         lambda: None,
     )
-    focused = await capability.run(_context(), {"focus": "pâtes"})
+    focused = await capability.run(_context(), {"focus": "ce qu'on mange"})
     assert focused.ok is True
-    assert focused.data["count"] == 1
-    empty = await capability.run(_context(), {"focus": "absent"})
-    assert empty.ok is False
+    assert focused.data["count"] == 2
+    assert focused.data["focus"] == "ce qu'on mange"
+    elsewhere = await capability.run(_context(), {"channel_id": "999"})
+    assert elsewhere.ok is False
+    late = await capability.run(_context(), {"since": "25:00"})
+    assert late.ok is False
 
 
 async def test_about_lists_the_registered_tools() -> None:
@@ -239,7 +239,7 @@ async def test_poll_is_posted_and_refuses_a_direct_message() -> None:
     assert posted == ["Pizza ?"]
 
 
-async def test_weather_forecast_builds_day_tabs() -> None:
+async def test_weather_forecast_lists_the_days() -> None:
     moment = 1_760_000_000
 
     def handler(
@@ -264,10 +264,12 @@ async def test_weather_forecast_builds_day_tabs() -> None:
     result = await capability.run(_context(), {"city": "Lyon", "type": "forecast"})
     assert result.ok is True
     assert len(result.data["days"]) == 2
-    assert "pluie" in result.data["days"][0]["text"]
+    assert result.data["days"][0]["description"] == "Pluie"
+    rendered = render_weather(result.data)
+    assert rendered.cards and "Pluie" in rendered.cards[0].as_text()
 
 
-async def test_football_reads_the_next_fixture() -> None:
+async def test_football_falls_back_to_thesportsdb_without_a_key() -> None:
     def handler(
         _method: str, url: str, _headers: Mapping[str, str], _body: bytes | None
     ) -> HttpResponse:
@@ -280,7 +282,7 @@ async def test_football_reads_the_next_fixture() -> None:
     capability = football_capability(FakeHttp(handler))
     result = await capability.run(_context(), {"team": "PSG"})
     assert result.ok is True
-    assert "OM" in result.data["matches"][0]
+    assert result.data["matches"][0]["away"] == "OM"
 
 
 def test_youtube_ids_and_missing_captions() -> None:
@@ -313,12 +315,15 @@ async def test_the_other_media_tools_parse_their_payloads(tmp_path: Path) -> Non
     def handler(
         method: str, url: str, headers: Mapping[str, str], body: bytes | None
     ) -> HttpResponse:
+        if "themoviedb" in url and "/movie/1" in url:
+            return _json({"genres": [{"name": "SF"}], "runtime": 155, "overview": "désert"})
         if "themoviedb" in url:
             return _json(
                 {
                     "results": [
                         {
                             "media_type": "movie",
+                            "id": 1,
                             "title": "Dune",
                             "overview": "désert",
                             "vote_average": 8,
@@ -360,13 +365,23 @@ async def test_the_other_media_tools_parse_their_payloads(tmp_path: Path) -> Non
             )
         if "/places?" in url:
             assert headers["apikey"] == "prim"
-            return _json({"places": [{"id": "stop_area:1", "name": "République"}]})
+            return _json(
+                {
+                    "places": [
+                        {
+                            "embedded_type": "stop_area",
+                            "quality": 90,
+                            "stop_area": {"id": "stop_area:1", "name": "République"},
+                        }
+                    ]
+                }
+            )
         return _json(
             {
                 "departures": [
                     {
                         "display_informations": {"label": "11", "direction": "Mairie"},
-                        "stop_date_time": {"departure_date_time": "20261011T193000"},
+                        "stop_date_time": {"departure_date_time": _soon()},
                     }
                 ]
             }
@@ -378,21 +393,14 @@ async def test_the_other_media_tools_parse_their_payloads(tmp_path: Path) -> Non
     track = await track_capability(http, "id", "secret").run(_context(), {"query": "Nights"})
     settings = replace(Settings.for_tests(tmp_path), prim_api_key="prim")
     bus = await transport_capability(http, settings).run(_context(), {"stop": "République"})
-    assert media.data["results"][0]["title"] == "Dune"
+    assert media.data["title"] == "Dune"
+    assert media.data["length"] == "2 h 35"
     assert game.data["price"] == "10€"
     assert track.data["tracks"][0]["artists"] == "Frank"
-    assert "11" in bus.data["rows"][0]
-    assert "19:30" in bus.data["rows"][0]
+    assert bus.data["rows"][0]["code"] == "11"
+    assert bus.data["rows"][0]["waits"] == ["9 min"]
 
 
-def test_tabs_roundtrip_and_keep_a_bound(tmp_path: Path) -> None:
-    database = _database(tmp_path)
-    store = TabStore(database)
-    saved = store.save(3, (("lundi", "pluie"), ("mardi", "soleil")))
-    store.attach(saved.id, 99)
-    loaded = store.get(saved.id)
-    assert loaded is not None
-    assert loaded.message_id == 99
-    assert loaded.tabs[1] == ("mardi", "soleil")
-    assert store.recent()[0].id == saved.id
-    database.close()
+def _soon() -> str:
+    moment = datetime.now(ZoneInfo("Europe/Paris")) + timedelta(minutes=9, seconds=10)
+    return moment.strftime("%Y%m%dT%H%M%S")

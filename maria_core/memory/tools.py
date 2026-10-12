@@ -9,23 +9,30 @@ from maria_core.memory.policy import Actor, denial
 from maria_core.memory.service import Memories
 from maria_core.memory.store import MemoryDenied
 
+_REMEMBER = (
+    "Retient un fait précis et confirmé. scope=user : la personne qui parle, ou subject_user_id "
+    "pour quelqu'un d'autre (ça devient une proposition qu'iel validera). scope=guild : le "
+    "serveur (modérateur, sinon proposition). scope=self : tes propres goûts ; origin=own si "
+    "c'est ton avis à toi, owner si ton créateur te l'impose. memory_id : corrige un souvenir "
+    "faux au lieu d'en créer un nouveau. Écris le fait à la 3e personne, court."
+)
+
 
 def memory_capabilities(memories: Memories) -> tuple[Capability, ...]:
     return (
         Capability(
             name="remember_fact",
-            description=(
-                "Retient un fait demandé explicitement. scope=user pour la personne, "
-                "guild pour le serveur (modérateur, sinon une proposition), "
-                "self pour MARIA (propriétaire)."
-            ),
+            description=_REMEMBER,
             parameters=_remember_schema(),
             risk=Risk.WRITE,
             run=_remember(memories),
         ),
         Capability(
             name="search_memory",
-            description="Cherche un souvenir déjà accepté. Les propositions n'y sont pas.",
+            description=(
+                "Cherche dans les souvenirs acceptés (personne, goût, surnom, projet, chose déjà "
+                "dite) quand ce n'est pas déjà dans le prompt. Les propositions n'y sont pas."
+            ),
             parameters=_query_schema(),
             risk=Risk.READ,
             run=_search(memories),
@@ -49,37 +56,66 @@ def _remember(memories: Memories) -> Callable[[Context, Mapping[str, Any]], Any]
         content = str(args.get("content") or "").strip()
         if not content:
             return Result(ok=False, data={}, error="Souvenir vide.")
-        scope = str(args.get("scope") or "user")
         actor = _actor(context)
-        subject = _subject(scope, context)
-        if scope == "guild" and denial(actor, scope, subject):
-            proposal = await asyncio.to_thread(
-                memories.store.propose,
-                scope="guild",
-                content=content,
-                subject_user_id=None,
-                guild_id=context.guild_id,
-                channel_id=context.channel_id,
-                source_message_id=context.message_id,
-                now=memories.now(),
-            )
-            return Result(ok=True, data={"proposed": proposal.id, "content": proposal.content})
         try:
-            memory = await asyncio.to_thread(
-                memories.store.remember,
-                actor,
-                scope=scope,
-                subject_id=subject,
-                guild_id=context.guild_id,
-                content=content,
-                source="explicit",
-                now=memories.now(),
-            )
+            if args.get("memory_id"):
+                memory = await asyncio.to_thread(
+                    memories.store.correct, actor, int(args["memory_id"]), content, memories.now()
+                )
+                return Result(ok=True, data={"id": memory.id, "content": memory.content})
+            return await _write(memories, context, actor, args, content)
         except (MemoryDenied, ValueError) as exc:
             return Result(ok=False, data={}, error=str(exc))
-        return Result(ok=True, data={"id": memory.id, "content": memory.content})
 
     return run
+
+
+async def _write(
+    memories: Memories, context: Context, actor: Actor, args: Mapping[str, Any], content: str
+) -> Result:
+    scope = str(args.get("scope") or "user")
+    subject = _subject(scope, context, args)
+    own = scope == "self" and str(args.get("origin") or "own") == "own"
+    if not own and denial(actor, scope, subject):
+        return await _propose(memories, context, scope, subject, content)
+    memory = await asyncio.to_thread(
+        memories.store.remember,
+        actor,
+        scope=scope,
+        subject_id=subject,
+        guild_id=context.guild_id,
+        content=content,
+        source="explicit",
+        now=memories.now(),
+        own=own,
+    )
+    return Result(ok=True, data={"id": memory.id, "content": memory.content})
+
+
+async def _propose(
+    memories: Memories, context: Context, scope: str, subject: int, content: str
+) -> Result:
+    if scope == "self":
+        return Result(ok=False, data={}, error="Tes goûts viennent de toi ou de ton créateur.")
+    proposal = await asyncio.to_thread(
+        memories.store.propose,
+        scope=scope,
+        content=content,
+        subject_user_id=subject if scope == "user" else None,
+        guild_id=context.guild_id,
+        channel_id=context.channel_id,
+        source_message_id=context.message_id,
+        now=memories.now(),
+    )
+    who = "la personne concernée" if scope == "user" else "un modérateur"
+    return Result(
+        ok=True,
+        data={
+            "proposed": proposal.id,
+            "content": proposal.content,
+            "note": f"Pas encore retenu : {who} doit valider (/moi ou /global).",
+        },
+    )
 
 
 def _search(memories: Memories) -> Callable[[Context, Mapping[str, Any]], Any]:
@@ -89,16 +125,16 @@ def _search(memories: Memories) -> Callable[[Context, Mapping[str, Any]], Any]:
             str(args.get("query") or ""),
             user_id=context.user_id,
             guild_id=context.guild_id,
+            limit=8,
         )
         await asyncio.to_thread(
-            memories.store.mark_used,
-            tuple(item.id for item in hits),
-            memories.now(),
+            memories.store.mark_used, tuple(item.id for item in hits), memories.now()
         )
-        return Result(
-            ok=True,
-            data={"memories": [{"id": item.id, "content": item.content} for item in hits]},
-        )
+        found = [
+            {"id": item.id, "about": _about(item.scope, item.subject_id), "content": item.content}
+            for item in hits
+        ]
+        return Result(ok=True, data={"memories": found})
 
     return run
 
@@ -107,10 +143,7 @@ def _forget(memories: Memories) -> Callable[[Context, Mapping[str, Any]], Any]:
     async def run(context: Context, args: Mapping[str, Any]) -> Result:
         try:
             removed = await asyncio.to_thread(
-                memories.store.forget,
-                _actor(context),
-                int(args["id"]),
-                memories.now(),
+                memories.store.forget, _actor(context), int(args["id"]), memories.now()
             )
         except MemoryDenied as exc:
             return Result(ok=False, data={}, error=str(exc))
@@ -121,16 +154,25 @@ def _forget(memories: Memories) -> Callable[[Context, Mapping[str, Any]], Any]:
     return run
 
 
+def _about(scope: str, subject_id: int) -> str:
+    if scope == "self":
+        return "toi"
+    if scope == "guild":
+        return "serveur"
+    return f"membre {subject_id}"
+
+
 def _actor(context: Context) -> Actor:
     return Actor(context.user_id, context.is_owner, context.is_moderator)
 
 
-def _subject(scope: str, context: Context) -> int:
+def _subject(scope: str, context: Context, args: Mapping[str, Any]) -> int:
     if scope == "self":
         return 0
     if scope == "guild":
         return context.guild_id or 0
-    return context.user_id
+    raw = str(args.get("subject_user_id") or "").strip()
+    return int(raw) if raw.isdigit() else context.user_id
 
 
 def _remember_schema() -> dict[str, Any]:
@@ -139,6 +181,9 @@ def _remember_schema() -> dict[str, Any]:
         "properties": {
             "content": {"type": "string"},
             "scope": {"type": "string", "enum": ["user", "guild", "self"]},
+            "subject_user_id": {"type": "string", "description": "Id Discord de la personne"},
+            "memory_id": {"type": "integer", "description": "Souvenir à corriger"},
+            "origin": {"type": "string", "enum": ["own", "owner"]},
         },
         "required": ["content"],
     }

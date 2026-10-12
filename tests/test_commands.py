@@ -18,12 +18,20 @@ def test_the_default_voice_matches_the_old_one() -> None:
     assert "objective_create" in text
     assert "n'invente" in text.lower() or "N'invente" in text
     names = sorted(command.name for command in PublicCommands.__cog_app_commands__)
-    assert names == ["chatbot", "global", "info", "moi", "taches"]
+    assert names == ["chatbot", "global", "info", "moi", "preferences", "taches"]
     group = next(
         command for command in PublicCommands.__cog_app_commands__ if command.name == "chatbot"
     )
     children = sorted(child.name for child in group.commands)
-    assert children == ["autotranscribe", "everyone", "forget", "mode"]
+    assert children == [
+        "autotranscribe",
+        "everyone",
+        "forget",
+        "mode",
+        "personnalite",
+        "python",
+        "spontaneite",
+    ]
 
 
 def test_mode_and_everyone_are_saved(tmp_path: Path) -> None:

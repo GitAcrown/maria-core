@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.capabilities.http import HttpClient, HttpError, parse_json, with_query
 from maria_core.plugins import PluginHost
+from maria_core.ui.widgets import Rendered, card, heading, links, thumbnail
 
 _OEMBED = "https://www.youtube.com/oembed"
 _LANGS = ("fr", "fr-FR", "en", "en-US")
@@ -51,13 +52,19 @@ def youtube_capability(http: HttpClient) -> Capability:
     )
 
 
-def render_youtube(data: Mapping[str, Any]) -> str:
-    title = str(data.get("title") or data.get("video_id") or "")
-    author = str(data.get("author") or "")
-    if not title:
-        return ""
-    head = f"{title} — {author}".strip(" —")
-    return head
+def render_youtube(data: Mapping[str, Any]) -> Rendered:
+    video = str(data.get("video_id") or "")
+    title = str(data.get("title") or video)
+    if not video:
+        return Rendered()
+    url = f"https://www.youtube.com/watch?v={video}"
+    built = card(
+        heading(f"▶️ {title}", str(data.get("author") or "")),
+        thumbnail("Sous-titres lus.", f"https://i.ytimg.com/vi/{video}/hqdefault.jpg"),
+        links([("Voir sur YouTube", url)]),
+        accent=0xFF0000,
+    )
+    return Rendered(cards=(built,), note=f"Vidéo lue : {title} — {data.get('author', '')}")
 
 
 def video_id(raw: str) -> str | None:
