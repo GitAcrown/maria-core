@@ -60,3 +60,7 @@ def _now(raw: str) -> datetime | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
