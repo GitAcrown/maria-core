@@ -185,7 +185,10 @@ def _widget_schema() -> dict[str, Any]:
         "properties": {
             "title": {"type": "string"},
             "emoji": {"type": "string"},
-            "accent": {"type": "string", "description": "Couleur de la barre, ex. #e67e22"},
+            "accent": {
+                "type": "string",
+                "description": "Couleur de barre, seulement si la personne en demande une",
+            },
             "blocks": {"type": "array", "items": block, "minItems": 1, "maxItems": 16},
         },
         "required": ["blocks"],

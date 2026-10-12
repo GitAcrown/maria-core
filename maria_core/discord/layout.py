@@ -1,4 +1,4 @@
-"""Cartes neutres -> Components v2. Une vue par message, découpée sous les limites Discord."""
+"""Cartes neutres -> Components v2, mises en page comme dans MARIA_R. Découpe sous les limites."""
 
 import logging
 import re
@@ -11,12 +11,14 @@ logger = logging.getLogger(__name__)
 
 TEXT_BUDGET = 3800
 COMPONENT_BUDGET = 38
-_URL = re.compile(r"(?<![<(])(https?://[^\s>)]+)")
+_URL = re.compile(r"(?<![<(])(https?://[^\s<>)]+)")
+_MD_LINK = re.compile(r"\[([^\]]+)\]\((?!<)(https?://[^)\s]+)\)")
 
 
 def quiet_links(text: str) -> str:
-    """Entoure les URLs nues de <> : Discord n'affiche pas d'aperçu."""
-    return _URL.sub(r"<\1>", text or "")
+    """Liens sans aperçu Discord : `[texte](<url>)` et URLs nues entre <>."""
+    value = _MD_LINK.sub(lambda match: f"[{match.group(1)}](<{match.group(2)}>)", text or "")
+    return _URL.sub(_bare, value)
 
 
 def build_views(
@@ -25,7 +27,7 @@ def build_views(
     cards: tuple[Card, ...],
     outro: str = "",
 ) -> list[discord.ui.LayoutView]:
-    """Commentaire, puis une carte par conteneur, puis le pied. Plusieurs vues si trop gros."""
+    """Commentaire et trait fin, puis les cartes, puis le pied. Plusieurs vues si trop gros."""
     pages: list[list[discord.ui.Item]] = [[]]
     budget = {"text": 0, "items": 0}
 
@@ -42,14 +44,29 @@ def build_views(
     if intro.strip():
         body = intro.strip()[:TEXT_BUDGET]
         push(discord.ui.TextDisplay(quiet_links(body)), len(body), 1)
+        push(_thin(), 0, 1)
     for item in cards:
-        container, chars, weight = _container(item)
-        if container is not None:
-            push(container, chars, weight)
+        for built, chars, weight in _placed(item):
+            push(built, chars, weight)
     if outro.strip():
         body = outro.strip()[:TEXT_BUDGET]
         push(discord.ui.TextDisplay(quiet_links(body)), len(body), 1)
     return [_view(page) for page in pages if page]
+
+
+def _placed(item: Card) -> list[tuple[discord.ui.Item, int, int]]:
+    """Une carte devient un conteneur ; une carte `bare` pose ses blocs à nu."""
+    children = [(built, _chars(block)) for block in item.blocks if (built := _block(block))]
+    if not children:
+        return []
+    if item.bare:
+        return [(built, chars, _weight(built)) for built, chars in children]
+    kwargs: dict[str, object] = {}
+    if item.accent is not None:
+        kwargs["accent_colour"] = discord.Colour(item.accent)
+    container = discord.ui.Container(*(built for built, _chars_ in children), **kwargs)
+    weight = 1 + sum(_weight(built) for built, _chars_ in children)
+    return [(container, sum(chars for _built, chars in children), weight)]
 
 
 def _view(items: list[discord.ui.Item]) -> discord.ui.LayoutView:
@@ -57,24 +74,6 @@ def _view(items: list[discord.ui.Item]) -> discord.ui.LayoutView:
     for item in items:
         view.add_item(item)
     return view
-
-
-def _container(item: Card) -> tuple[discord.ui.Container | None, int, int]:
-    children: list[discord.ui.Item] = []
-    chars = 0
-    for block in item.blocks:
-        built = _block(block)
-        if built is None:
-            continue
-        children.append(built)
-        chars += len(block.text) + sum(len(label) for label, _value in block.pairs)
-    if not children:
-        return None, 0, 0
-    kwargs: dict[str, object] = {}
-    if item.accent is not None:
-        kwargs["accent_colour"] = discord.Colour(item.accent)
-    weight = 1 + sum(_weight(child) for child in children)
-    return discord.ui.Container(*children, **kwargs), chars, weight
 
 
 def _block(block: Block) -> discord.ui.Item | None:
@@ -88,13 +87,23 @@ def _block(block: Block) -> discord.ui.Item | None:
         return None
 
 
+def _chars(block: Block) -> int:
+    return len(block.text) + sum(len(label) for label, _value in block.pairs)
+
+
 def _text(block: Block) -> discord.ui.Item | None:
     if not block.text:
         return None
     return discord.ui.TextDisplay(quiet_links(block.text[:TEXT_BUDGET]))
 
 
-def _separator(_block: Block) -> discord.ui.Item:
+def _separator(block: Block) -> discord.ui.Item:
+    if block.text == "wide":
+        return discord.ui.Separator(spacing=discord.SeparatorSpacing.large)
+    return _thin()
+
+
+def _thin() -> discord.ui.Separator:
     return discord.ui.Separator(spacing=discord.SeparatorSpacing.small)
 
 
@@ -114,8 +123,9 @@ def _gallery(block: Block) -> discord.ui.Item | None:
     if not block.urls:
         return None
     media = discord.ui.MediaGallery()
+    descriptions = dict((url, label) for label, url in block.pairs)
     for url in block.urls:
-        media.add_item(media=url)
+        media.add_item(media=url, description=descriptions.get(url) or None)
     return media
 
 
@@ -140,6 +150,15 @@ def _weight(item: discord.ui.Item) -> int:
     if isinstance(item, discord.ui.ActionRow):
         return 1 + len(item.children)
     return 1
+
+
+def _bare(match: re.Match[str]) -> str:
+    url = match.group(1)
+    trail = ""
+    while url and url[-1] in ".,;:!?":
+        trail = url[-1] + trail
+        url = url[:-1]
+    return f"<{url}>{trail}" if url else match.group(0)
 
 
 _BUILDERS = {

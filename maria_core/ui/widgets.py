@@ -52,6 +52,7 @@ class Card:
 
     blocks: tuple[Block, ...]
     accent: int | None = None
+    bare: bool = False
 
     def as_text(self) -> str:
         parts = [block.as_text() for block in self.blocks]
@@ -119,8 +120,9 @@ def text(content: str) -> Block:
     return Block("text", content.strip())
 
 
-def separator() -> Block:
-    return Block("separator")
+def separator(*, wide: bool = False) -> Block:
+    """Trait fin entre deux blocs ; large sous un titre."""
+    return Block("separator", "wide" if wide else "")
 
 
 def stats(pairs: list[tuple[str, str]] | tuple[tuple[str, str], ...]) -> Block:
@@ -134,8 +136,11 @@ def thumbnail(content: str, url: str) -> Block:
     return Block("thumbnail", content.strip(), url=url)
 
 
-def gallery(urls: list[str] | tuple[str, ...]) -> Block:
-    return Block("gallery", urls=tuple(url for url in urls if _is_url(url))[:MAX_GALLERY])
+def gallery(urls: list[str] | tuple[str, ...], captions: dict[str, str] | None = None) -> Block:
+    """Images ; `captions` associe une légende à une URL."""
+    kept = tuple(url for url in urls if _is_url(url))[:MAX_GALLERY]
+    notes = tuple((captions[url][:256], url) for url in kept if captions and captions.get(url))
+    return Block("gallery", urls=kept, pairs=notes)
 
 
 def footer(content: str) -> Block:
@@ -147,9 +152,10 @@ def links(pairs: list[tuple[str, str]] | tuple[tuple[str, str], ...]) -> Block:
     return Block("links", pairs=kept[:MAX_LINKS])
 
 
-def card(*blocks: Block | None, accent: int | None = None) -> Card:
+def card(*blocks: Block | None, accent: int | None = None, bare: bool = False) -> Card:
+    """`bare` : les blocs sont posés tels quels, sans conteneur (une galerie seule)."""
     kept = tuple(block for block in blocks if block is not None and _filled(block))
-    return Card(kept[:MAX_BLOCKS], accent)
+    return Card(kept[:MAX_BLOCKS], accent, bare)
 
 
 def _filled(block: Block) -> bool:

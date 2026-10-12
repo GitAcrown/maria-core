@@ -1,4 +1,4 @@
-"""Fiche Steam Store. Pas de clé."""
+"""Fiche Steam Store, mise en page comme dans MARIA_R. Pas de clé."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -7,11 +7,25 @@ from urllib.parse import quote
 from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.capabilities.http import HttpClient, HttpError, parse_json, with_query
 from maria_core.plugins import PluginHost
-from maria_core.ui.widgets import Rendered, card, heading, links, stats, text, thumbnail
+from maria_core.ui.emojis import GAMES
+from maria_core.ui.widgets import Rendered, card, footer, separator, text, thumbnail
 
 _SEARCH = "https://store.steampowered.com/api/storesearch/"
 _DETAILS = "https://store.steampowered.com/api/appdetails"
-
+_REVIEWS = "https://store.steampowered.com/appreviews/{}"
+_HEADER = "https://cdn.akamai.steamstatic.com/steam/apps/{}/header.jpg"
+_STORE = "https://store.steampowered.com/app/{}"
+_REVIEW_MAP = {
+    "Overwhelmingly Positive": ("🥇", "Acclamé"),
+    "Very Positive": ("👍", "Très positif"),
+    "Positive": ("👍", "Positif"),
+    "Mostly Positive": ("🙂", "Plutôt positif"),
+    "Mixed": ("😐", "Mitigé"),
+    "Mostly Negative": ("👎", "Plutôt négatif"),
+    "Negative": ("👎", "Négatif"),
+    "Very Negative": ("💀", "Très négatif"),
+    "Overwhelmingly Negative": ("💀", "Descendu en flammes"),
+}
 
 NAME = "steam"
 
@@ -51,62 +65,93 @@ def game_capability(http: HttpClient) -> Capability:
 def render_game(data: Mapping[str, Any]) -> Rendered:
     if not data.get("name"):
         return Rendered()
-    pairs = [
-        ("Prix", str(data.get("price") or "inconnu")),
-        ("Remise", str(data.get("discount") or "")),
-        ("Avis", str(data.get("reviews") or "")),
-        ("Sortie", str(data.get("released") or "")),
-    ]
-    meta = " · ".join(part for part in (data.get("genres"), data.get("developer")) if part)
-    description = str(data.get("description") or "")
-    image = str(data.get("image") or "")
+    app_id = str(data.get("app_id") or "")
+    lines = [str(data.get("price_line") or "Prix inconnu")]
+    if data.get("review"):
+        lines.append(str(data["review"]))
+    description = str(data.get("description") or "").strip()
+    if description:
+        lines.append(f"-# {description[:260]}{'…' if len(description) > 260 else ''}")
+    meta = "  ·  ".join(["Jeu", *(data.get("genres") or [])[:3]])
+    parts = [f"par {data['developer']}"] if data.get("developer") else []
+    if app_id:
+        parts.append(f"[Steam](<{_STORE.format(app_id)}>)")
     built = card(
-        heading(f"🎮 {data['name']}", meta),
-        stats(pairs),
-        thumbnail(description, image) if image else text(description),
-        links([("Page Steam", f"https://store.steampowered.com/app/{data.get('app_id')}")]),
-        accent=0x1B2838,
+        text(f"## {GAMES} {data['name']}\n-# {meta}"),
+        separator(wide=True),
+        thumbnail("\n".join(lines), _HEADER.format(app_id) if app_id else ""),
+        footer(" · ".join(parts)),
     )
-    return Rendered(cards=(built,), note=f"{data['name']} : {pairs[0][1]}. {meta}")
+    note = f"{data['name']} : {data.get('price') or 'prix inconnu'}. {data.get('review_label', '')}"
+    return Rendered(cards=(built,), note=note.strip())
 
 
-async def _find(http: HttpClient, query: str) -> dict[str, str] | None:
-    response = await http.request(
-        "GET",
-        with_query(_SEARCH, {"term": query, "l": "french", "cc": "FR"}),
+async def _find(http: HttpClient, query: str) -> dict[str, Any] | None:
+    payload = parse_json(
+        await http.request("GET", with_query(_SEARCH, {"term": query, "l": "french", "cc": "FR"}))
     )
-    payload = parse_json(response)
     items = payload.get("items") if isinstance(payload, dict) else None
     if not items or not isinstance(items[0], dict):
         return None
     app_id = str(items[0].get("id") or "")
     name = str(items[0].get("name") or query)
     details = await _details(http, app_id)
-    return {"name": name, "app_id": app_id, **details}
+    review = await _review(http, app_id)
+    return {"name": name, "app_id": app_id, **details, **review}
 
 
-async def _details(http: HttpClient, app_id: str) -> dict[str, str]:
+async def _details(http: HttpClient, app_id: str) -> dict[str, Any]:
     if not app_id:
-        return {"price": "", "description": ""}
+        return {}
     response = await http.request("GET", f"{_DETAILS}?appids={quote(app_id)}&l=french&cc=FR")
     payload = parse_json(response)
     block = payload.get(app_id) if isinstance(payload, dict) else None
     data = block.get("data") if isinstance(block, dict) else None
     if not isinstance(data, dict):
-        return {"price": "", "description": ""}
+        return {}
     price = data.get("price_overview") if isinstance(data.get("price_overview"), dict) else {}
-    percent = int(price.get("discount_percent") or 0)
-    genres = [
-        str(item.get("description")) for item in data.get("genres") or [] if isinstance(item, dict)
-    ]
-    recommendations = (data.get("recommendations") or {}).get("total")
+    genres = [str(g.get("description")) for g in data.get("genres") or [] if isinstance(g, dict)]
+    developers = [str(item) for item in data.get("developers") or []]
     return {
-        "price": str(price.get("final_formatted") or ("gratuit" if data.get("is_free") else "")),
-        "discount": f"-{percent} %" if percent else "",
+        "price": "Gratuit" if data.get("is_free") else str(price.get("final_formatted") or ""),
+        "price_line": _price_line(bool(data.get("is_free")), price),
         "description": str(data.get("short_description") or "")[:500],
-        "image": str(data.get("header_image") or ""),
-        "genres": ", ".join(genres[:3]),
-        "developer": ", ".join(str(item) for item in (data.get("developers") or [])[:2]),
-        "released": str((data.get("release_date") or {}).get("date") or ""),
-        "reviews": f"{recommendations} recommandations" if recommendations else "",
+        "genres": genres[:3],
+        "developer": developers[0] if developers else "",
     }
+
+
+async def _review(http: HttpClient, app_id: str) -> dict[str, str]:
+    """Avis Steam en une étiquette ; rien si l'appel échoue, la fiche reste affichable."""
+    if not app_id:
+        return {}
+    url = with_query(
+        _REVIEWS.format(quote(app_id)),
+        {"json": "1", "language": "all", "purchase_type": "all", "num_per_page": "0"},
+    )
+    try:
+        payload = parse_json(await http.request("GET", url))
+    except (ValueError, HttpError):
+        return {}
+    summary = payload.get("query_summary") if isinstance(payload, dict) else None
+    desc = str((summary or {}).get("review_score_desc") or "")
+    icon, label = _REVIEW_MAP.get(desc, ("", ""))
+    return {"review": f"{icon} {label}".strip(), "review_label": label} if label else {}
+
+
+def _price_line(free: bool, price: Mapping[str, Any]) -> str:
+    if free:
+        return "**Gratuit**"
+    final = price.get("final")
+    if not isinstance(final, int):
+        return str(price.get("final_formatted") or "Prix inconnu")
+    discount = int(price.get("discount_percent") or 0)
+    if not discount:
+        return f"**{_euros(final)}**"
+    initial = price.get("initial")
+    was = f" ~~{_euros(initial)}~~" if isinstance(initial, int) else ""
+    return f"**{_euros(final)}**{was}  🏷️ **-{discount}%**"
+
+
+def _euros(cents: int) -> str:
+    return f"{cents / 100:.2f} €"

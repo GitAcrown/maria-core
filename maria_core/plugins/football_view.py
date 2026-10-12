@@ -1,13 +1,16 @@
-"""Matchs API-Football ou TheSportsDB -> données compactes et cartes."""
+"""Matchs API-Football ou TheSportsDB -> données compactes et cartes, comme dans MARIA_R."""
 
 import unicodedata
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
-from maria_core.ui.widgets import Card, Rendered, card, footer, heading, stats, text
+from maria_core.ui.emojis import DIRECT, FOOTBALL, FOOTBALL_PLAYER
+from maria_core.ui.widgets import Card, Rendered, card, footer, separator, text
 
 _LIVE = frozenset({"1H", "2H", "ET", "BT", "P", "LIVE", "INT"})
 _DONE = frozenset({"FT", "AET", "PEN"})
+_STARTED = _LIVE | _DONE | {"HT"}
 _STATUS = {
     "HT": "Mi-temps",
     "NS": "À venir",
@@ -22,94 +25,161 @@ _STATUS = {
 _STATS = (
     ("Ball Possession", "Possession"),
     ("Total Shots", "Tirs"),
-    ("Shots on Goal", "Cadrés"),
+    ("Shots on Goal", "Tirs cadrés"),
     ("Corner Kicks", "Corners"),
+    ("Yellow Cards", "Cartons jaunes"),
+    ("Red Cards", "Cartons rouges"),
 )
-_GREEN = 0x2E7D32
+_TSDB_DONE = frozenset({"Match Finished", "FT", "AET", "After Extra Time", "Pen", "PEN"})
 
 
 def name_matches(target: str, candidate: str) -> bool:
     wanted, found = _fold(target), _fold(candidate)
-    return bool(wanted) and (wanted in found or found in wanted)
+    return bool(wanted) and bool(found) and (wanted == found or wanted in found or found in wanted)
 
 
 def normalize(data: Mapping[str, Any]) -> dict[str, Any]:
     mode = str(data.get("mode") or "")
     if mode == "match":
         return {"mode": "match", "match": _api_match(data.get("match") or {})}
-    if mode in {"list", "live"}:
+    if mode == "live":
         rows = [_api_match(item) for item in data.get("matches") or []]
-        return {"mode": mode, "title": str(data.get("title") or "En direct"), "matches": rows}
+        return {"mode": "live", "matches": rows}
+    if mode == "list":
+        rows = [_api_match(item) for item in data.get("matches") or []]
+        return {"mode": "list", "title": str(data.get("title") or ""), "matches": rows}
     rows = [_tsdb_match(item) for item in data.get("matches") or []]
+    if data.get("single") and rows:
+        return {"mode": "match", "match": rows[0]}
     return {"mode": "list", "title": str(data.get("title") or ""), "matches": rows}
 
 
 def render_football(data: Mapping[str, Any]) -> Rendered:
-    if data.get("mode") == "match":
+    mode = data.get("mode")
+    matches = [item for item in data.get("matches") or [] if isinstance(item, dict)]
+    if mode == "match":
         match = data.get("match") or {}
         return Rendered(cards=(_match_card(match),), note=_line(match))
-    matches = [item for item in data.get("matches") or [] if isinstance(item, dict)]
-    title = str(data.get("title") or "Matchs")
-    lines = [f"- {_line(item)}" for item in matches[:10]]
-    built = card(heading(f"⚽ {title}"), text("\n".join(lines) or "Aucun match."), accent=_GREEN)
-    return Rendered(cards=(built,), note=f"{title} : " + " ; ".join(_line(m) for m in matches[:5]))
+    if mode == "live":
+        return Rendered(cards=(_live_card(matches),), note=_notes("En direct", matches))
+    title = str(data.get("title") or "")
+    return Rendered(cards=(_list_card(title, matches),), note=_notes(title, matches))
 
 
 def _match_card(match: Mapping[str, Any]) -> Card:
-    head = f"{match.get('home')} {match.get('score')} {match.get('away')}"
-    meta = " · ".join(part for part in (match.get("status"), match.get("league")) if part)
-    blocks = [heading(f"⚽ {head}", meta)]
+    round_name = f"  ·  {match['round']}" if match.get("round") else ""
+    blocks = [
+        text(
+            f"## {FOOTBALL} {match.get('league') or 'Football'}\n-# {match['status']}{round_name}"
+        ),
+        separator(wide=True),
+        text(_score_line(match)),
+    ]
     scorers = match.get("scorers") or {}
-    lines = [f"**{team}** : {', '.join(names)}" for team, names in scorers.items() if names]
+    lines = [
+        f"**{team}**  ·  {', '.join(scorers[team])}"
+        for team in (match["home"], match["away"])
+        if scorers.get(team)
+    ]
     if lines:
-        blocks.append(text("\n".join(lines)))
+        blocks += [separator(), text(f"{FOOTBALL_PLAYER} " + f"\n{FOOTBALL_PLAYER} ".join(lines))]
     if match.get("stats"):
-        blocks.append(stats(list(match["stats"])))
-    if match.get("kickoff"):
-        blocks.append(footer(f"Coup d'envoi {match['kickoff']}"))
-    return card(*blocks, accent=_GREEN)
+        stat_lines = [f"-# {label} · {home} — {away}" for label, home, away in match["stats"]]
+        blocks += [separator(), text("\n".join(stat_lines))]
+    blocks.append(footer(str(match.get("source") or "API-Football")))
+    return card(*blocks)
+
+
+def _list_card(title: str, matches: list[dict[str, Any]]) -> Card:
+    lines = []
+    for match in matches[:5]:
+        score = match["score"] if match.get("started") else "vs"
+        date = f"  `{match['day']}`" if match.get("day") else ""
+        lines.append(f"{match['home']} **{score}** {match['away']}{date}")
+    source = matches[0].get("source") if matches else "TheSportsDB"
+    return card(
+        text(f"## {FOOTBALL} Derniers matchs · {title}"),
+        separator(wide=True),
+        text("\n".join(lines) if lines else "-# Aucun match récent."),
+        footer(str(source)),
+    )
+
+
+def _live_card(matches: list[dict[str, Any]]) -> Card:
+    lines = []
+    for match in matches[:10]:
+        minute = f"`{match['elapsed']}'`" if match.get("elapsed") else "`live`"
+        lines.append(f"{minute}  {match['home']} **{match['score']}** {match['away']}")
+    return card(
+        text(f"## {FOOTBALL} Matchs en direct"),
+        separator(wide=True),
+        text("\n".join(lines) if lines else "-# Aucun match en direct pour le moment."),
+        footer("API-Football"),
+    )
+
+
+def _score_line(match: Mapping[str, Any]) -> str:
+    if match.get("started"):
+        return f"### {match['home']}  **{match['score']}**  {match['away']}"
+    line = f"### {match['home']}  vs  {match['away']}"
+    return f"{line}\n-# {match['kickoff']}" if match.get("kickoff") else line
 
 
 def _api_match(raw: Mapping[str, Any]) -> dict[str, Any]:
     fixture = raw.get("fixture") or {}
     teams = raw.get("teams") or {}
     goals = raw.get("goals") or {}
+    status = fixture.get("status") or {}
     home = str((teams.get("home") or {}).get("name") or "?")
     away = str((teams.get("away") or {}).get("name") or "?")
+    short = str(status.get("short") or "")
+    timestamp = fixture.get("timestamp")
     return {
         "home": home,
         "away": away,
-        "score": _score(goals.get("home"), goals.get("away")),
-        "status": _status(fixture.get("status") or {}),
+        "score": f"{goals.get('home')} - {goals.get('away')}",
+        "started": short in _STARTED,
+        "status": _status(short, status.get("elapsed")),
+        "elapsed": status.get("elapsed") if short in _LIVE else None,
         "league": str((raw.get("league") or {}).get("name") or ""),
-        "kickoff": _kickoff(fixture.get("timestamp")),
+        "round": str((raw.get("league") or {}).get("round") or ""),
+        "kickoff": f"<t:{timestamp}:F>" if isinstance(timestamp, int) else "",
+        "day": datetime.fromtimestamp(timestamp).strftime("%d/%m")
+        if isinstance(timestamp, int)
+        else "",
         "scorers": _scorers(raw.get("events") or []),
-        "stats": _stats(raw.get("statistics") or [], home, away),
+        "stats": _stats(raw.get("statistics") or [], home, away) if short in _LIVE else [],
+        "source": "API-Football",
     }
 
 
 def _tsdb_match(raw: Mapping[str, Any]) -> dict[str, Any]:
-    when = " ".join(str(part) for part in (raw.get("dateEvent"), raw.get("strTime")) if part)
+    home_goals, away_goals = raw.get("intHomeScore"), raw.get("intAwayScore")
+    started = home_goals not in {None, ""} and away_goals not in {None, ""}
+    day = str(raw.get("dateEvent") or "")
     return {
         "home": str(raw.get("strHomeTeam") or "?"),
         "away": str(raw.get("strAwayTeam") or "?"),
-        "score": _score(raw.get("intHomeScore"), raw.get("intAwayScore")),
-        "status": str(raw.get("strStatus") or ""),
+        "score": f"{home_goals} - {away_goals}" if started else "vs",
+        "started": started,
+        "status": "Terminé" if str(raw.get("strStatus") or "") in _TSDB_DONE else "À venir",
+        "elapsed": None,
         "league": str(raw.get("strLeague") or ""),
-        "kickoff": when,
+        "round": "",
+        "kickoff": " ".join(part for part in (day, str(raw.get("strTime") or "")[:5]) if part),
+        "day": f"{day[8:10]}/{day[5:7]}" if len(day) == 10 else "",
         "scorers": {},
         "stats": [],
+        "source": "TheSportsDB",
     }
 
 
-def _status(status: Mapping[str, Any]) -> str:
-    short = str(status.get("short") or "")
-    elapsed = status.get("elapsed")
+def _status(short: str, elapsed: object) -> str:
     if short in _LIVE:
-        return f"🔴 EN DIRECT · {elapsed}'" if elapsed else "🔴 EN DIRECT"
+        return f"{DIRECT} EN DIRECT · {elapsed}'" if elapsed else f"{DIRECT} EN DIRECT"
     if short in _DONE:
         return "Terminé" + {"AET": " (a.p.)", "PEN": " (t.a.b.)"}.get(short, "")
-    return _STATUS.get(short, short)
+    return _STATUS.get(short, short or "?")
 
 
 def _scorers(events: list[Any]) -> dict[str, list[str]]:
@@ -122,48 +192,41 @@ def _scorers(events: list[Any]) -> dict[str, list[str]]:
             continue
         team = str((event.get("team") or {}).get("name") or "")
         player = str((event.get("player") or {}).get("name") or "?")
-        minute = (event.get("time") or {}).get("elapsed")
+        timing = event.get("time") or {}
+        minute = f"{timing.get('elapsed')}'" if timing.get("elapsed") else ""
+        if timing.get("extra"):
+            minute += f"+{timing['extra']}"
         tag = {"Own Goal": " (csc)", "Penalty": " (pen)"}.get(detail, "")
-        found.setdefault(team, []).append(f"{player} {minute}'{tag}" if minute else player)
+        found.setdefault(team, []).append(f"{player} {minute}{tag}".strip())
     return found
 
 
-def _stats(blocks: list[Any], home: str, away: str) -> list[tuple[str, str]]:
+def _stats(blocks: list[Any], home: str, away: str) -> list[tuple[str, str, str]]:
     values: dict[str, dict[str, str]] = {}
     for block in blocks:
         if not isinstance(block, dict):
             continue
         team = str((block.get("team") or {}).get("name") or "")
         for item in block.get("statistics") or []:
-            if isinstance(item, dict):
-                values.setdefault(str(item.get("type")), {})[team] = str(item.get("value") or 0)
-    pairs = []
-    for key, label in _STATS:
-        found = values.get(key)
-        if found:
-            pairs.append((label, f"{found.get(home, '?')} - {found.get(away, '?')}"))
-    return pairs
+            if isinstance(item, dict) and item.get("value") is not None:
+                values.setdefault(str(item.get("type")), {})[team] = str(item["value"])
+    return [
+        (label, values[key].get(home, "0"), values[key].get(away, "0"))
+        for key, label in _STATS
+        if key in values
+    ]
 
 
 def _line(match: Mapping[str, Any]) -> str:
-    status = f" ({match.get('status')})" if match.get("status") else ""
-    when = f"{match.get('kickoff')} " if match.get("kickoff") and match.get("score") == "-" else ""
-    return f"{when}{match.get('home')} {match.get('score')} {match.get('away')}{status}"
+    score = match.get("score") if match.get("started") else "vs"
+    return f"{match.get('home')} {score} {match.get('away')} ({match.get('status')})"
 
 
-def _score(home: object, away: object) -> str:
-    if home in {None, ""} or away in {None, ""}:
-        return "-"
-    return f"{home}-{away}"
-
-
-def _kickoff(raw: object) -> str:
-    if not isinstance(raw, int):
-        return ""
-    return f"<t:{raw}:F>" if raw > 0 else ""
+def _notes(title: str, matches: list[dict[str, Any]]) -> str:
+    return f"{title} : " + " ; ".join(_line(match) for match in matches[:5])
 
 
 def _fold(name: str) -> str:
     decomposed = unicodedata.normalize("NFKD", name or "")
     letters = "".join(char for char in decomposed if not unicodedata.combining(char))
-    return " ".join(letters.casefold().replace("fc", " ").split())
+    return "".join(char for char in letters.casefold() if char.isalnum())
