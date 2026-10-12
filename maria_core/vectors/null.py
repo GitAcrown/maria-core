@@ -8,5 +8,7 @@ class NullIndex:
     def delete(self, memory_id: int) -> None:
         return None
 
-    def search(self, text: str, *, limit: int) -> tuple[int, ...]:
+    def search(
+        self, text: str, *, limit: int, max_distance: float | None = None
+    ) -> tuple[int, ...]:
         return ()

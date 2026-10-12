@@ -8,6 +8,7 @@ from typing import Any
 from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.capabilities.http import HttpClient, HttpError, parse_json, with_query
 from maria_core.plugins import PluginHost
+from maria_core.ui.widgets import Rendered, card, footer, heading, links, stats, thumbnail
 
 _TOKEN = "https://accounts.spotify.com/api/token"
 _SEARCH = "https://api.spotify.com/v1/search"
@@ -42,7 +43,10 @@ def track_capability(http: HttpClient, client_id: str, secret: str) -> Capabilit
 
     return Capability(
         name="search_track",
-        description="Fiche Spotify d'un morceau. Inclus l'artiste si tu le connais.",
+        description=(
+            "Fiche Spotify d'un morceau (artiste, album, année, durée, pochette, lien). Pour "
+            "identifier une chanson ou montrer un titre précis. Artiste + titre si connus."
+        ),
         parameters={
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -54,12 +58,22 @@ def track_capability(http: HttpClient, client_id: str, secret: str) -> Capabilit
     )
 
 
-def render_track(data: Mapping[str, Any]) -> str:
-    lines = []
-    for item in data.get("tracks") or []:
-        if isinstance(item, dict):
-            lines.append(f"- {item.get('artists')} — {item.get('name')} ({item.get('album')})")
-    return "\n".join(lines)
+def render_track(data: Mapping[str, Any]) -> Rendered:
+    tracks = [item for item in data.get("tracks") or [] if isinstance(item, dict)]
+    if not tracks:
+        return Rendered()
+    best = tracks[0]
+    others = [f"{item['artists']} — {item['name']}" for item in tracks[1:3]]
+    year = f" · {best['year']}" if best.get("year") else ""
+    built = card(
+        heading(f"🎵 {best['name']}", str(best["artists"])),
+        thumbnail(f"**{best['album']}**{year}", str(best.get("cover") or "")),
+        stats([("Durée", str(best.get("duration") or ""))]),
+        links([("Écouter sur Spotify", str(best.get("url") or ""))]),
+        footer("Autres : " + " · ".join(others)) if others else None,
+        accent=0x1DB954,
+    )
+    return Rendered(cards=(built,), note=f"{best['artists']} — {best['name']} ({best['album']})")
 
 
 async def _token(http: HttpClient, client_id: str, secret: str, cache: dict[str, Any]) -> str:
@@ -100,9 +114,15 @@ def _track(item: Mapping[str, Any]) -> dict[str, str]:
     names = ", ".join(
         str(artist.get("name") or "") for artist in artists if isinstance(artist, dict)
     )
+    images = album.get("images") if isinstance(album.get("images"), list) else []
+    cover = str(images[0].get("url") or "") if images and isinstance(images[0], dict) else ""
+    seconds = int(item.get("duration_ms") or 0) // 1000
     return {
         "name": str(item.get("name") or ""),
         "artists": names,
         "album": str(album.get("name") or ""),
+        "year": str(album.get("release_date") or "")[:4],
+        "duration": f"{seconds // 60}:{seconds % 60:02d}" if seconds else "",
+        "cover": cover,
         "url": str((item.get("external_urls") or {}).get("spotify") or ""),
     }

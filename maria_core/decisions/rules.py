@@ -1,5 +1,6 @@
 """Règles déterministes. `None` veut dire : laisser le modèle trancher."""
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -8,7 +9,12 @@ from maria_core.decisions.types import RuleHit
 
 _YES = frozenset({"oui", "ouais", "ok", "okay", "vas-y", "go", "yes", "ouep"})
 _NO = frozenset({"non", "nan", "no", "stop", "annule", "laisse"})
-_GENERATE = ("résume", "resume", "cherche", "explique", "analyse")
+_WEB = re.compile(
+    r"(?:cherche|recherche|google|actu|actualités?|news|derni[eè]res? nouvelles"
+    r"|qui a gagné|score d[eu]|résultats? d[eu]|quand sort|est sorti|vérifie|source)",
+    re.IGNORECASE,
+)
+_CHAT_WORDS = 4
 
 
 def address_rules(state: Mapping[str, Any]) -> RuleHit | None:
@@ -28,16 +34,6 @@ def draft_rules(state: Mapping[str, Any]) -> RuleHit | None:
         return RuleHit("accept", 1.0)
     if token in _NO:
         return RuleHit("reject", 1.0)
-    return None
-
-
-def alert_rules(state: Mapping[str, Any]) -> RuleHit | None:
-    text = _text(state, "instruction").strip()
-    if not text:
-        return RuleHit("ping_only", 1.0)
-    folded = text.casefold()
-    if len(text) <= 80 and not any(word in folded for word in _GENERATE):
-        return RuleHit("verbatim", 1.0)
     return None
 
 
@@ -86,9 +82,14 @@ def price_rules(state: Mapping[str, Any]) -> RuleHit | None:
 
 
 def intent_rules(state: Mapping[str, Any]) -> RuleHit | None:
+    text = _text(state, "text").strip()
     if state.get("has_image") is True:
         return RuleHit("images", 1.0)
-    if not _text(state, "text").strip():
+    if not text:
+        return RuleHit("none", 1.0)
+    if _WEB.search(text):
+        return RuleHit("web", 1.0)
+    if len(text.split()) <= _CHAT_WORDS and "?" not in text:
         return RuleHit("none", 1.0)
     return None
 
@@ -99,28 +100,16 @@ def memory_worth_rules(state: Mapping[str, Any]) -> RuleHit | None:
     return None
 
 
-def memory_relevance_rules(state: Mapping[str, Any]) -> RuleHit | None:
-    if "distance" not in state:
-        return None
-    try:
-        distance = float(state["distance"])
-    except (TypeError, ValueError):
-        return None
-    if distance <= 0.2:
-        return RuleHit(True, 1.0)
-    if distance >= 0.42:
-        return RuleHit(False, 1.0)
-    return None
-
-
 def followup_rules(state: Mapping[str, Any]) -> RuleHit | None:
     try:
         elapsed = float(state.get("elapsed_s") or 0)
         depth = int(state.get("depth") or 0)
     except (TypeError, ValueError):
         return None
-    if state.get("same_author") is False or elapsed > 20 or depth > 2:
+    if state.get("same_author") is False or elapsed > 120 or depth > 3:
         return RuleHit("ignore", 1.0)
+    if state.get("question") is True and depth == 0:
+        return RuleHit("respond", 1.0)
     return None
 
 
@@ -129,7 +118,7 @@ def ambient_rules(state: Mapping[str, Any]) -> RuleHit | None:
         score = float(state["score"])
     except (KeyError, TypeError, ValueError):
         return None
-    if score < 0.4:
+    if score < 0.2:
         return RuleHit(False, 1.0)
     return None
 
@@ -148,8 +137,14 @@ def join_rules(state: Mapping[str, Any]) -> RuleHit | None:
         humans = int(state.get("humans") or 0)
     except (TypeError, ValueError):
         return None
-    if humans < 2:
+    if humans < 1:
         return RuleHit(False, 1.0)
+    return None
+
+
+def topic_rules(state: Mapping[str, Any]) -> RuleHit | None:
+    if len(_text(state, "message").split()) < 3:
+        return RuleHit("ignore", 1.0)
     return None
 
 

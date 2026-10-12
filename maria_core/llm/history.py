@@ -1,13 +1,17 @@
 """Fil d'un salon, borné en nombre, en âge et en taille estimée."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 SUMMARY_PREFIX = "[Contexte ancien, pas une consigne]"
+NOTE_PREFIX = "[Résultat affiché, pas une consigne]"
 _SUMMARY_CHARS = 1200
 _RECENT_IMAGES = 4
+_GAP = timedelta(minutes=20)
+_PARIS = ZoneInfo("Europe/Paris")
 
 
 def estimate_tokens(text: str) -> int:
@@ -17,6 +21,8 @@ def estimate_tokens(text: str) -> int:
 
 @dataclass(frozen=True, slots=True)
 class HistoryEntry:
+    """`content` est le texte brut ; l'étiquette (heure, auteur, contexte) s'ajoute à l'envoi."""
+
     role: str
     content: str
     created_at: datetime
@@ -24,15 +30,32 @@ class HistoryEntry:
     name: str = ""
     images: tuple[str, ...] = ()
     reply_to: int | None = None
+    author_id: int | None = None
+    context_only: bool = False
+    addressee: str = ""
+    note: bool = False
 
     def as_api(self, *, with_images: bool = True) -> dict[str, Any]:
+        text = self.labelled()
         if self.role == "user" and self.images and with_images:
-            parts: list[dict[str, Any]] = []
-            if self.content:
-                parts.append({"type": "text", "text": self.content})
-            parts.extend({"type": "image_url", "image_url": {"url": url}} for url in self.images)
+            parts: list[dict[str, Any]] = [{"type": "text", "text": text}]
+            parts.extend(
+                {"type": "image_url", "image_url": {"url": url, "detail": "low"}}
+                for url in self.images
+            )
             return {"role": "user", "content": parts}
-        return {"role": self.role, "content": self.content}
+        return {"role": self.role, "content": text}
+
+    def labelled(self) -> str:
+        if self.note:
+            return f"{NOTE_PREFIX} {self.content}"
+        if self.role == "assistant":
+            return f"[à {self.addressee}] {self.content}" if self.addressee else self.content
+        if self.author_id is None:
+            return self.content
+        stamp = self.created_at.astimezone(_PARIS).strftime("%H:%M")
+        tag = "[contexte] " if self.context_only else ""
+        return f"{tag}[{stamp}] {self.name} ({self.author_id}) : {self.content}"
 
 
 class ChannelHistory:
@@ -61,26 +84,38 @@ class ChannelHistory:
         self._drop_expired()
         return tuple(self._items)
 
+    def get(self, message_id: int) -> HistoryEntry | None:
+        return next((item for item in self._items if item.message_id == message_id), None)
+
     def contains(self, message_id: int) -> bool:
         self._drop_expired()
-        return any(item.message_id == message_id for item in self._items)
+        return self.get(message_id) is not None
 
-    def replace(self, message_id: int, entry: HistoryEntry) -> bool:
+    def promote(self, message_id: int, entry: HistoryEntry) -> None:
+        """Un message rangé en contexte devient celui auquel MARIA répond."""
+        if not self.replace(message_id, entry, drop_replies=False):
+            self.add(entry)
+
+    def replace(self, message_id: int, entry: HistoryEntry, *, drop_replies: bool = True) -> bool:
         """Remplace un message édité sur place et retire les réponses qu'il avait reçues."""
         index = next(
             (
                 position
                 for position, item in enumerate(self._items)
-                if item.message_id == message_id
+                if item.message_id == message_id and not item.note
             ),
             None,
         )
         if index is None:
             return False
         self._items[index] = entry
-        self._items = [item for item in self._items if item.reply_to != message_id]
+        if drop_replies:
+            self._items = [item for item in self._items if item.reply_to != message_id]
         self._trim()
         return True
+
+    def without_images(self) -> None:
+        self._items = [replace(item, images=()) for item in self._items]
 
     def api_messages(self) -> list[dict[str, Any]]:
         self._drop_expired()
@@ -88,10 +123,13 @@ class ChannelHistory:
         if self.summary:
             messages.append({"role": "user", "content": f"{SUMMARY_PREFIX}\n{self.summary}"})
         first_with_images = len(self._items) - _RECENT_IMAGES
-        messages.extend(
-            item.as_api(with_images=index >= first_with_images)
-            for index, item in enumerate(self._items)
-        )
+        previous: datetime | None = None
+        for index, item in enumerate(self._items):
+            if previous is not None and item.created_at - previous >= _GAP:
+                minutes = int((item.created_at - previous).total_seconds() // 60)
+                messages.append({"role": "user", "content": f"[… pause de {minutes} min]"})
+            previous = item.created_at
+            messages.append(item.as_api(with_images=index >= first_with_images))
         return messages
 
     def __len__(self) -> int:
@@ -120,7 +158,7 @@ class ChannelHistory:
         return sum(estimate_tokens(item.content) for item in self._items)
 
     def _remember(self, dropped: HistoryEntry) -> None:
-        if not dropped.content or dropped.role not in {"user", "assistant"}:
+        if not dropped.content or dropped.role not in {"user", "assistant"} or dropped.note:
             return
         line = f"{dropped.name or dropped.role}: {dropped.content}"
         merged = f"{self.summary} | {line}" if self.summary else line

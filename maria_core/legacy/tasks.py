@@ -7,23 +7,19 @@ from datetime import datetime, timedelta
 
 from maria_core.legacy.model import ObjectiveDraft, Skip
 from maria_core.legacy.read import as_dict, cell, moment, positive
-from maria_core.objectives.schedule import PARIS, clock_text, first_due, weekdays
+from maria_core.legacy.triggers import count, skip_task, trigger_of
+from maria_core.objectives.schedule import EVENT_TRIGGERS, first_due
 
 _SOURCE = "tâche"
-_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _TERMINAL = frozenset({"completed", "failed", "cancelled"})
-_SIGNALS = frozenset({"voice_join", "voice_leave", "voice_stream", "member_join"})
-_SIGNAL_ALIASES = {
-    "stream": "voice_stream",
-    "golive": "voice_stream",
-    "go_live": "voice_stream",
-    "live": "voice_stream",
-    "join_voice": "voice_join",
-    "leave_voice": "voice_leave",
+_PRICE = {
+    "lt": "price_below",
+    "lte": "price_below",
+    "gt": "price_above",
+    "lt_prev": "price_lower",
+    "gt_prev": "price_higher",
 }
-_PRICE = {"lt": "price_below", "gt": "price_above"}
 _DRAFT_TTL = timedelta(minutes=10)
-_DEFAULT_WATCH_MINUTES = 6 * 60
 
 
 def convert_tasks(
@@ -50,7 +46,7 @@ def convert_task(row: sqlite3.Row, *, now: datetime) -> ObjectiveDraft | Skip:
         return status
     name, notice = status
     kind = _kind(row)
-    trigger = _trigger(row, kind)
+    trigger = trigger_of(row, kind)
     if isinstance(trigger, Skip):
         return trigger
     built, trigger_notice = trigger
@@ -66,7 +62,7 @@ def convert_task(row: sqlite3.Row, *, now: datetime) -> ObjectiveDraft | Skip:
         return expires
     owner = positive(cell(row, "user_id", 0))
     if owner is None:
-        return _skip(row, "auteur absent")
+        return skip_task(row, "auteur absent")
     notes = " ; ".join(part for part in (notice, trigger_notice) if part)
     return _draft(row, owner, name, built, payload, condition, due, expires, notes, now)
 
@@ -129,7 +125,7 @@ def _place_var(
 def _status(row: sqlite3.Row, now: datetime) -> tuple[str, str] | Skip:
     status = str(cell(row, "status", "pending") or "pending").strip()
     if status in _TERMINAL:
-        return _skip(row, "statut terminal", loud=False)
+        return skip_task(row, "statut terminal", loud=False)
     if status == "draft":
         return _draft_status(row, now)
     if status == "paused":
@@ -138,13 +134,13 @@ def _status(row: sqlite3.Row, now: datetime) -> tuple[str, str] | Skip:
         return "active", "reprise d'une exécution interrompue"
     if status in {"pending", "armed"}:
         return "active", ""
-    return _skip(row, f"statut inconnu ({status})")
+    return skip_task(row, f"statut inconnu ({status})")
 
 
 def _draft_status(row: sqlite3.Row, now: datetime) -> tuple[str, str] | Skip:
     created = moment(cell(row, "created_at", ""))
     if created is None or now - created > _DRAFT_TTL:
-        return _skip(row, "brouillon expiré", loud=False)
+        return skip_task(row, "brouillon expiré", loud=False)
     return "draft", ""
 
 
@@ -154,74 +150,6 @@ def _kind(row: sqlite3.Row) -> str:
     if kind in {"", "at"} and schedule in {"daily", "weekly"}:
         return "recurring"
     return kind or "at"
-
-
-def _trigger(row: sqlite3.Row, kind: str) -> tuple[dict[str, object], str] | Skip:
-    if kind == "event":
-        return _event_trigger(row)
-    if kind == "watch":
-        return _watch_trigger(row)
-    if kind == "recurring":
-        return _clock_trigger(row)
-    if kind == "at":
-        return _at_trigger(row)
-    return _skip(row, f"type non porté ({kind})")
-
-
-def _event_trigger(row: sqlite3.Row) -> tuple[dict[str, object], str] | Skip:
-    trigger = as_dict(cell(row, "trigger_json", ""))
-    if _signal(trigger):
-        return _skip(row, "signal Discord ciblé non porté")
-    pattern = str(trigger.get("pattern") or "").strip()
-    if pattern.split(":", 1)[0] in _SIGNALS or not pattern:
-        return _skip(row, "écoute sans motif")
-    notes: list[str] = []
-    aliases = trigger.get("aliases")
-    if isinstance(aliases, list) and any(str(item).strip() for item in aliases):
-        notes.append("variantes non reprises")
-    author = str(trigger.get("author") or "").strip()
-    if author and author != "any":
-        notes.append("filtre d'auteur non repris")
-    return {"type": "on_topic", "pattern": pattern}, " ; ".join(notes)
-
-
-def _watch_trigger(row: sqlite3.Row) -> tuple[dict[str, object], str] | Skip:
-    raw = as_dict(cell(row, "trigger_json", ""))
-    minutes = raw.get("interval_minutes")
-    notice = ""
-    if minutes is None or minutes == "":
-        minutes = _DEFAULT_WATCH_MINUTES
-        notice = "intervalle par défaut de 6 h"
-    try:
-        value = int(str(minutes))
-    except ValueError:
-        return _skip(row, "intervalle illisible")
-    if value < 1:
-        return _skip(row, "intervalle illisible")
-    return {"type": "interval", "every_s": value * 60}, notice
-
-
-def _clock_trigger(row: sqlite3.Row) -> tuple[dict[str, object], str] | Skip:
-    schedule = str(cell(row, "schedule_kind", "once") or "once")
-    clock = _clock(row)
-    if isinstance(clock, Skip):
-        return clock
-    if schedule == "daily":
-        return {"type": "daily", "time": clock}, ""
-    if schedule != "weekly":
-        return _skip(row, "récurrence sans rythme")
-    days = _days(row)
-    if isinstance(days, Skip):
-        return days
-    found, notice = days
-    return {"type": "weekly", "time": clock, "weekdays": list(found)}, notice
-
-
-def _at_trigger(row: sqlite3.Row) -> tuple[dict[str, object], str] | Skip:
-    when = moment(cell(row, "execute_at", ""))
-    if when is None:
-        return _skip(row, "date illisible")
-    return {"type": "at", "at": when.isoformat()}, ""
 
 
 def _action(
@@ -248,12 +176,17 @@ def _from_plan(
     if kind == "read_url":
         return _fetch(row, body, text, condition)
     if kind == "web_search":
-        return _skip(row, "recherche web non portée")
+        return _search(row, body, text, condition)
     if kind == "prompt":
         return _prompt(row, body, text, condition)
+    if condition is not None and condition.get("type") != "judge":
+        return skip_task(row, "condition de prix sans lecture de page")
     if condition is not None:
-        return _skip(row, "condition sans lecture de page")
-    return _reminder(row, text)
+        condition = {**condition, "when": "before"}
+    reminder = _reminder(row, text)
+    if isinstance(reminder, Skip):
+        return reminder
+    return reminder[0], condition
 
 
 def _plan(row: sqlite3.Row, kind: str) -> dict[str, object] | Skip | None:
@@ -268,11 +201,11 @@ def _plan(row: sqlite3.Row, kind: str) -> dict[str, object] | Skip | None:
     trigger = as_dict(cell(row, "trigger_json", ""))
     url = str(trigger.get("url") or "").strip()
     if not url:
-        return _skip(row, "veille sans page")
+        return skip_task(row, "veille sans page")
     try:
         threshold = float(str(trigger["threshold"]))
     except (KeyError, ValueError):
-        return _skip(row, "veille sans seuil")
+        return skip_task(row, "veille sans seuil")
     return {
         "primary": {"type": "read_url", "url": url},
         "condition": {
@@ -292,8 +225,21 @@ def _fetch(
 ) -> tuple[dict[str, object], dict[str, object] | None] | Skip:
     url = str(primary.get("url") or "").strip()
     if not url:
-        return _skip(row, "lecture sans URL")
+        return skip_task(row, "lecture sans URL")
     return {"type": "fetch_then", "url": url, "text": text or "Lecture de la page."}, condition
+
+
+def _search(
+    row: sqlite3.Row,
+    primary: dict[str, object],
+    text: str,
+    condition: dict[str, object] | None,
+) -> tuple[dict[str, object], dict[str, object] | None] | Skip:
+    query = str(primary.get("query") or "").strip()
+    if not query:
+        return skip_task(row, "recherche sans requête")
+    action = {"type": "fetch_then", "url": "", "query": query, "text": text, "write": True}
+    return action, condition
 
 
 def _prompt(
@@ -302,12 +248,16 @@ def _prompt(
     text: str,
     condition: dict[str, object] | None,
 ) -> tuple[dict[str, object], dict[str, object] | None] | Skip:
-    if condition is not None:
-        return _skip(row, "jugement sur un prompt non porté")
     say = str(primary.get("say") or text).strip()
     if not say:
-        return _skip(row, "prompt sans texte")
-    return {"type": "report", "text": say}, None
+        return skip_task(row, "prompt sans texte")
+    if condition is None:
+        return {"type": "report", "text": say}, None
+    if condition.get("type") != "judge":
+        return skip_task(row, "condition de prix sur un texte rédigé")
+    rule = str(condition.get("text") or "")
+    instruction = f"{say}\nN'envoie rien (réponds [[SILENCE]]) sauf si : {rule}."
+    return {"type": "report", "text": instruction}, None
 
 
 def _reminder(
@@ -315,7 +265,7 @@ def _reminder(
 ) -> tuple[dict[str, object], dict[str, object] | None] | Skip:
     body = _text(row) if text is None else text.strip()
     if not body:
-        return _skip(row, "rappel sans texte")
+        return skip_task(row, "rappel sans texte")
     return {"type": "remind", "text": body}, None
 
 
@@ -325,27 +275,27 @@ def _condition(row: sqlite3.Row, raw: object) -> dict[str, object] | Skip | None
     kind = str(raw.get("type") or "")
     if kind == "judge":
         text = str(raw.get("text") or "").strip()
-        return {"type": "judge", "text": text} if text else _skip(row, "jugement sans texte")
+        return {"type": "judge", "text": text} if text else skip_task(row, "jugement sans texte")
     if kind != "price":
-        return _skip(row, "condition inconnue")
+        return skip_task(row, "condition inconnue")
     mapped = _PRICE.get(str(raw.get("op") or "lt"))
     if mapped is None:
-        return _skip(row, f"comparaison de prix non portée ({raw.get('op')})")
+        return skip_task(row, f"comparaison de prix non portée ({raw.get('op')})")
     try:
         return {"type": mapped, "threshold": float(str(raw["threshold"]))}
     except (KeyError, ValueError):
-        return _skip(row, "seuil de prix illisible")
+        return skip_task(row, "seuil de prix illisible")
 
 
 def _due(row: sqlite3.Row, trigger: dict[str, object], now: datetime) -> str | Skip | None:
-    if trigger.get("type") == "on_topic":
+    if trigger.get("type") in EVENT_TRIGGERS:
         return None
     try:
         due = first_due(trigger, now)
     except ValueError:
-        return _skip(row, "échéance illisible")
+        return skip_task(row, "échéance illisible")
     if due is None:
-        return _skip(row, "échéance illisible")
+        return skip_task(row, "échéance illisible")
     return due.isoformat()
 
 
@@ -375,9 +325,9 @@ def _draft(
         action=action,
         status=status,
         next_run_at=due,
-        fires=_count(row, "fires_count"),
+        fires=count(row, "fires_count"),
         max_fires=_limit(row),
-        cooldown_s=_count(row, "cooldown_seconds"),
+        cooldown_s=count(row, "cooldown_seconds"),
         expires_at=expires,
         state={},
         created_at=created.isoformat() if created else now.isoformat(),
@@ -405,35 +355,6 @@ def _channels(row: sqlite3.Row) -> tuple[int, ...]:
     return tuple(found)
 
 
-def _clock(row: sqlite3.Row) -> str | Skip:
-    raw = str(cell(row, "time_of_day", "")).strip()
-    if not raw:
-        when = moment(cell(row, "execute_at", ""))
-        if when is None:
-            return _skip(row, "heure illisible")
-        local = when.astimezone(PARIS)
-        raw = f"{local.hour:02d}:{local.minute:02d}"
-    try:
-        return clock_text(raw)
-    except ValueError:
-        return _skip(row, "heure illisible")
-
-
-def _days(row: sqlite3.Row) -> tuple[tuple[str, ...], str] | Skip:
-    raw = cell(row, "weekdays", "[]")
-    try:
-        parsed = json.loads(raw) if isinstance(raw, str) else raw
-    except json.JSONDecodeError:
-        parsed = []
-    found = weekdays(parsed)
-    if found:
-        return found, ""
-    when = moment(cell(row, "execute_at", ""))
-    if when is None:
-        return _skip(row, "jours illisibles")
-    return (_DAYS[when.astimezone(PARIS).weekday()],), "jour repris de la date d'exécution"
-
-
 def _expires(row: sqlite3.Row) -> str | Skip | None:
     raw = (
         str(cell(row, "expires_at", "") or "").strip()
@@ -442,7 +363,7 @@ def _expires(row: sqlite3.Row) -> str | Skip | None:
     if not raw:
         return None
     when = moment(raw)
-    return when.isoformat() if when else _skip(row, "expiration illisible")
+    return when.isoformat() if when else skip_task(row, "expiration illisible")
 
 
 def _say(plan: dict[str, object], row: sqlite3.Row) -> str:
@@ -457,24 +378,8 @@ def _text(row: sqlite3.Row) -> str:
     return str(recipe.get("say") or cell(row, "instruction", "") or cell(row, "title", "")).strip()
 
 
-def _signal(trigger: dict[str, object]) -> str:
-    for key in ("signal", "type"):
-        token = str(trigger.get(key) or "").strip().casefold().replace("-", "_").replace(" ", "_")
-        token = _SIGNAL_ALIASES.get(token, token)
-        if token in _SIGNALS:
-            return token
-    return ""
-
-
-def _count(row: sqlite3.Row, key: str) -> int:
-    try:
-        return max(0, int(str(cell(row, key, 0) or 0)))
-    except ValueError:
-        return 0
-
-
 def _limit(row: sqlite3.Row) -> int | None:
-    number = _count(row, "max_fires")
+    number = count(row, "max_fires")
     return number or None
 
 
@@ -490,7 +395,3 @@ def _var_name(row: sqlite3.Row) -> str:
 def _var_skip(row: sqlite3.Row, reason: str, *, loud: bool = True) -> Skip:
     identity = f"{cell(row, 'guild_id', 0)}:{cell(row, 'user_id', 0)}:{_var_name(row)}"
     return Skip("variable", identity, reason, loud)
-
-
-def _skip(row: sqlite3.Row, reason: str, *, loud: bool = True) -> Skip:
-    return Skip(_SOURCE, str(cell(row, "id", "?")), reason, loud)

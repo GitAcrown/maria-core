@@ -30,6 +30,7 @@ class Proposal:
     status: str
     created_at: datetime
     reply_message_id: int | None
+    review_of: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

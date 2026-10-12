@@ -34,6 +34,7 @@ class Context:
     is_owner: bool
     is_moderator: bool
     text: str
+    author_name: str = ""
 
     def __post_init__(self) -> None:
         _positive(self.user_id, "user_id")

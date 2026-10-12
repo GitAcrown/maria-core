@@ -39,28 +39,6 @@ class SocialStore:
             (channel_id, hour_key, author_id),
         )
 
-    def learn(self, guild_id: int, emoji: str, now: datetime) -> None:
-        self._database.execute(
-            """
-            INSERT INTO emoji_usage (guild_id, emoji, uses, updated_at)
-            VALUES (?, ?, 1, ?)
-            ON CONFLICT(guild_id, emoji) DO UPDATE SET
-                uses = uses + 1,
-                updated_at = excluded.updated_at
-            """,
-            (guild_id, emoji, now.isoformat()),
-        )
-
-    def top_emojis(self, guild_id: int, limit: int = 3) -> tuple[str, ...]:
-        rows = self._database.fetchall(
-            """
-            SELECT emoji FROM emoji_usage
-            WHERE guild_id = ? ORDER BY uses DESC, emoji LIMIT ?
-            """,
-            (guild_id, limit),
-        )
-        return tuple(str(row["emoji"]) for row in rows)
-
     def log(
         self,
         *,

@@ -2,15 +2,16 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from maria_core.db import Database
 from maria_core.objectives.model import Objective, StaleObjective
-from maria_core.objectives.price import extract_price
-from maria_core.objectives.quota import fetches_allowed, next_budget_day
-from maria_core.objectives.schedule import EVENT_TRIGGERS, next_due, time_key
+from maria_core.objectives.pipeline import Delivery, Fetcher, Judge, Outcome, Pipeline, Writer
+from maria_core.objectives.quota import STORM_PER_HOUR, fires_last_hour, next_budget_day
+from maria_core.objectives.schedule import EVENT_TRIGGERS, local_text, next_due, time_key
+from maria_core.objectives.signals import ObjectiveSignal
 from maria_core.objectives.store import ObjectiveStore
 
 logger = logging.getLogger(__name__)
@@ -18,13 +19,9 @@ logger = logging.getLogger(__name__)
 MISSED_AFTER = timedelta(hours=6)
 _BACKOFF = (30, 120, 600)
 
-type Fetcher = Callable[[str], Awaitable[str]]
-type Writer = Callable[[str], Awaitable[str]]
-type Judge = Callable[[str, str], Awaitable[bool]]
-
 
 class Courier(Protocol):
-    async def send(self, objective: Objective, text: str) -> None: ...
+    async def send(self, objective: Objective, delivery: Delivery) -> None: ...
 
     async def notify(self, objective: Objective, text: str) -> None: ...
 
@@ -43,19 +40,26 @@ class Runner:
         self._store = store
         self._database = database
         self._clock = clock or _now
-        self._fetcher = fetcher or _empty_fetch
-        self._writer = writer or _echo
-        self._judge = judge
+        self.pipeline = Pipeline(database, fetcher=fetcher or _empty_fetch, judge=judge)
+        self.pipeline.writer = writer
         self.courier: Courier | None = None
 
-    async def execute(self, objective: Objective, *, key: str | None = None) -> str:
+    async def execute(
+        self,
+        objective: Objective,
+        *,
+        key: str | None = None,
+        signal: ObjectiveSignal | None = None,
+    ) -> str:
         try:
-            return await self._run(objective, key)
+            return await self._run(objective, key, signal)
         except Exception:
             await asyncio.to_thread(self._store.release, objective.id, objective.version)
             raise
 
-    async def _run(self, objective: Objective, key: str | None) -> str:
+    async def _run(
+        self, objective: Objective, key: str | None, signal: ObjectiveSignal | None
+    ) -> str:
         now = self._clock()
         if objective.expires_at is not None and objective.expires_at <= now:
             await self._settle(
@@ -67,6 +71,12 @@ class Runner:
                 state=objective.state,
             )
             return "expired"
+        if (
+            signal is not None
+            and await asyncio.to_thread(fires_last_hour, self._database, objective.id, now)
+            >= STORM_PER_HOUR
+        ):
+            return "storm"
         activation = key or time_key(objective.next_run_at)
         gate = await asyncio.to_thread(self._store.open_run, objective.id, activation, now)
         if gate == "busy":
@@ -75,71 +85,42 @@ class Runner:
             await self._skip(objective, now)
             return "duplicate"
         if _late(objective, now):
-            await self._notify(objective, f"Rappel manqué : {objective.title}")
-            await asyncio.to_thread(
-                self._store.complete_run, objective.id, activation, "missed", "", now
-            )
-            await self._move(objective, now, fired=False, state=dict(objective.state))
-            return "missed"
+            return await self._missed(objective, activation, now)
+        return await self._perform(objective, activation, now, signal)
+
+    async def _perform(
+        self, objective: Objective, activation: str, now: datetime, signal: ObjectiveSignal | None
+    ) -> str:
         try:
-            outcome, state = await self._perform(objective)
+            runs = await asyncio.to_thread(self._store.recent_summaries, objective.id)
+            outcome = await self.pipeline.run(objective, now=now, signal=signal, runs=runs)
+            if outcome.delivery is not None:
+                await self._send(objective, outcome.delivery)
         except Exception as exc:
             logger.exception("Objectif %s en échec", objective.id)
             await self._failed(objective, activation, now, exc)
             return "failed"
         await asyncio.to_thread(
-            self._store.complete_run, objective.id, activation, outcome, "", now
+            self._store.complete_run,
+            objective.id,
+            activation,
+            outcome.kind,
+            "",
+            now,
+            outcome.summary,
         )
-        await self._move(objective, now, fired=outcome == "sent", state=state, outcome=outcome)
-        return outcome
+        await self._move(objective, now, outcome)
+        return outcome.kind
 
-    async def _perform(self, objective: Objective) -> tuple[str, dict[str, Any]]:
-        state = dict(objective.state)
-        if str(objective.action.get("type")) == "fetch_then":
-            return await self._fetch(objective, state)
-        await self._send(objective, await self._text(objective))
-        return "sent", state
-
-    async def _fetch(
-        self, objective: Objective, state: dict[str, Any]
-    ) -> tuple[str, dict[str, Any]]:
-        allowed = await asyncio.to_thread(fetches_allowed, self._database, self._clock())
-        if not allowed:
-            return "budget", state
-        page = await self._fetcher(str(objective.action.get("url") or ""))
-        price = extract_price(page)
-        previous = _number(state.get("price"))
-        if price is not None:
-            state["price"] = price
-        if not await self._holds(objective, page, price, previous):
-            return "skipped", state
-        body = str(objective.action.get("text") or page[:400])
-        if price is not None:
-            body = body.replace("{price}", f"{price:.2f}")
-        await self._send(objective, body)
-        return "sent", state
-
-    async def _holds(
-        self,
-        objective: Objective,
-        page: str,
-        price: float | None,
-        previous: float | None,
-    ) -> bool:
-        condition = objective.condition
-        if condition is None:
-            return True
-        if condition.get("type") == "judge":
-            if self._judge is None:
-                return False
-            return await self._judge(str(condition.get("text") or ""), page)
-        return _price_holds(condition, price, previous)
-
-    async def _text(self, objective: Objective) -> str:
-        raw = str(objective.action.get("text") or objective.title)
-        if str(objective.action.get("type")) == "report":
-            return (await self._writer(raw)).strip() or raw
-        return raw
+    async def _missed(self, objective: Objective, activation: str, now: datetime) -> str:
+        when = local_text(objective.next_run_at.isoformat()) if objective.next_run_at else "?"
+        text = str(objective.action.get("text") or objective.title)
+        await self._notify(objective, f"Rappel manqué ({when}) : {text}")
+        await asyncio.to_thread(
+            self._store.complete_run, objective.id, activation, "missed", "", now
+        )
+        await self._move(objective, now, Outcome("missed", objective.state))
+        return "missed"
 
     async def _failed(self, objective: Objective, key: str, now: datetime, exc: Exception) -> None:
         attempts = int(objective.state.get("attempts") or 0) + 1
@@ -148,7 +129,7 @@ class Runner:
             self._store.complete_run, objective.id, key, "failed", str(exc), now
         )
         if attempts > len(_BACKOFF):
-            await self._notify(objective, f"Objectif « {objective.title} » en échec.")
+            await self._notify(objective, f"Objectif « {objective.title} » en échec : {exc}")
             await self._settle(
                 objective,
                 now=now,
@@ -159,53 +140,44 @@ class Runner:
                 error=str(exc),
             )
             return
+        retry = now + timedelta(seconds=_BACKOFF[attempts - 1])
+        if objective.next_run_at is None and str(objective.trigger.get("type")) in EVENT_TRIGGERS:
+            retry = None
         await self._settle(
             objective,
             now=now,
             status="active",
-            next_run_at=now + timedelta(seconds=_BACKOFF[attempts - 1]),
+            next_run_at=retry,
             fires=objective.fires,
             state=state,
             error=str(exc),
         )
 
-    async def _move(
-        self,
-        objective: Objective,
-        now: datetime,
-        *,
-        fired: bool,
-        state: Mapping[str, Any],
-        outcome: str = "sent",
-    ) -> None:
-        updated = dict(state)
+    async def _move(self, objective: Objective, now: datetime, outcome: Outcome) -> None:
+        fired = outcome.kind == "sent"
+        updated: dict[str, Any] = dict(outcome.state)
         fires = objective.fires + (1 if fired else 0)
-        status, nxt = _next_status(objective, now, fires, outcome)
+        status, nxt = _next_status(objective, now, fires, outcome.kind)
         if fired:
             updated["last_fire_at"] = now.isoformat()
             updated["attempts"] = 0
         await self._settle(
-            objective,
-            now=now,
-            status=status,
-            next_run_at=nxt,
-            fires=fires,
-            state=updated,
+            objective, now=now, status=status, next_run_at=nxt, fires=fires, state=updated
         )
 
     async def _skip(self, objective: Objective, now: datetime) -> None:
         try:
-            await self._move(objective, now, fired=False, state=objective.state)
+            await self._move(objective, now, Outcome("skipped", objective.state))
         except StaleObjective:
             await asyncio.to_thread(self._store.release, objective.id, objective.version)
 
     async def _settle(self, objective: Objective, **fields: object) -> None:
         await asyncio.to_thread(self._store.settle, objective, **fields)
 
-    async def _send(self, objective: Objective, text: str) -> None:
+    async def _send(self, objective: Objective, delivery: Delivery) -> None:
         if self.courier is None:
             raise RuntimeError("Aucun canal pour envoyer l'objectif.")
-        await self.courier.send(objective, text)
+        await self.courier.send(objective, delivery)
 
     async def _notify(self, objective: Objective, text: str) -> None:
         if self.courier is not None:
@@ -213,17 +185,16 @@ class Runner:
 
 
 def _next_status(
-    objective: Objective,
-    now: datetime,
-    fires: int,
-    outcome: str,
+    objective: Objective, now: datetime, fires: int, outcome: str
 ) -> tuple[str, datetime | None]:
+    kind = str(objective.trigger.get("type") or "")
     if outcome == "budget":
+        if kind in EVENT_TRIGGERS:
+            return "active", None
         return "active", next_budget_day(now)
     if objective.max_fires is not None and fires >= objective.max_fires:
         return "done", None
     nxt = next_due(objective.trigger, after=now)
-    kind = str(objective.trigger.get("type") or "")
     if nxt is None and kind not in EVENT_TRIGGERS:
         return "done", None
     return "active", nxt
@@ -235,35 +206,8 @@ def _late(objective: Objective, now: datetime) -> bool:
     return now - objective.next_run_at > MISSED_AFTER
 
 
-def _price_holds(
-    condition: Mapping[str, Any],
-    price: float | None,
-    previous: float | None,
-) -> bool:
-    kind = str(condition.get("type") or "")
-    if kind == "price_below":
-        return price is not None and price < float(condition["threshold"])
-    if kind == "price_above":
-        return price is not None and price > float(condition["threshold"])
-    if kind == "price_drop":
-        if price is None or previous is None or previous <= 0:
-            return False
-        return (previous - price) / previous * 100 >= float(condition["percent"])
-    return True
-
-
-def _number(raw: object) -> float | None:
-    if isinstance(raw, bool) or not isinstance(raw, int | float):
-        return None
-    return float(raw)
-
-
 async def _empty_fetch(_url: str) -> str:
     return ""
-
-
-async def _echo(prompt: str) -> str:
-    return prompt
 
 
 def _now() -> datetime:

@@ -51,12 +51,13 @@ def _sections(registry: CapabilityRegistry) -> dict[str, str]:
         "tech": (
             f"Modèle {MODEL_MAIN}, repli {MODEL_FALLBACK}, transcription {MODEL_TRANSCRIBE}. "
             f"Python {platform.python_version()} sur {platform.system()}. "
-            "Mémoire de salon en process, base SQLite, décisions règles puis JEV."
+            "Fil de salon en mémoire (1 h), base SQLite, souvenirs SQLite + Chroma, "
+            "décisions par règles puis JEV, vues Discord Components v2."
         ),
         "tools": tools,
         "limits": (
             "Elle ne vote pas aux sondages et ne voit pas les votes en cours. "
-            "run_python est réservé au propriétaire, et à un serveur qui l'a activé. "
+            "run_python tourne dans une sandbox (ni réseau ni fichiers), coupable par serveur. "
             "Sans la clé d'une capacité, cette capacité n'existe pas pour elle."
         ),
     }

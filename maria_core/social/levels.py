@@ -16,9 +16,9 @@ class Level:
 
 LEVELS = {
     "off": Level("off", 99.0, 0, 0.0, 0),
-    "quiet": Level("quiet", 0.85, 1, 0.0, 0),
-    "normal": Level("normal", 0.55, 3, 20.0, 2),
-    "chatty": Level("chatty", 0.35, 6, 45.0, 3),
+    "quiet": Level("quiet", 0.55, 1, 0.0, 0),
+    "normal": Level("normal", 0.35, 3, 18.0, 2),
+    "chatty": Level("chatty", 0.25, 6, 40.0, 3),
 }
 
 
@@ -52,6 +52,20 @@ def level_for(database: Database, guild_id: int, user_id: int) -> Level:
     if guild is None:
         return LEVELS["normal"]
     return parse_level(str(guild["spontaneity"] or ""))
+
+
+def set_member_level(database: Database, guild_id: int, user_id: int, name: str | None) -> None:
+    """Niveau propre à un membre ; `None` revient à celui du serveur."""
+    if name is not None and name not in LEVELS:
+        raise ValueError("Niveau inconnu : off, quiet, normal, chatty.")
+    database.execute(
+        """
+        INSERT INTO member_settings (user_id, guild_id, spontaneity)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id, guild_id) DO UPDATE SET spontaneity = excluded.spontaneity
+        """,
+        (user_id, guild_id, name),
+    )
 
 
 def set_level(database: Database, guild_id: int, name: str, now: str) -> Level:

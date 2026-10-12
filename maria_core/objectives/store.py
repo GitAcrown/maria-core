@@ -35,8 +35,10 @@ class ObjectiveStore:
         cooldown_s: int = 0,
         expires_at: datetime | None = None,
         status: str = "active",
+        origin_message_id: int | None = None,
+        state: Mapping[str, Any] | None = None,
     ) -> tuple[Objective, bool]:
-        duplicate = self.find_duplicate(owner_id, title, trigger, action)
+        duplicate = self.find_duplicate(owner_id, trigger, action, condition)
         if duplicate is not None:
             return duplicate, False
         if open_count(self._database, owner_id) >= MAX_OPEN:
@@ -48,8 +50,9 @@ class ObjectiveStore:
             INSERT INTO objectives (
                 owner_id, guild_id, channel_ids, deliver, title, trigger_json,
                 condition_json, action_json, status, next_run_at, fires, max_fires,
-                cooldown_s, expires_at, state_json, version, last_error, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, '{}', 1, '', ?, ?)
+                cooldown_s, expires_at, state_json, version, last_error, created_at, updated_at,
+                origin_message_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 1, '', ?, ?, ?)
             """,
             (
                 owner_id,
@@ -65,8 +68,10 @@ class ObjectiveStore:
                 max_fires,
                 cooldown_s,
                 _iso(expires_at),
+                _dump(state or {}),
                 stamp,
                 stamp,
+                origin_message_id,
             ),
         )
         created = self.get(result.lastrowid)
@@ -94,19 +99,48 @@ class ObjectiveStore:
     def find_duplicate(
         self,
         owner_id: int,
-        title: str,
         trigger: Mapping[str, Any],
         action: Mapping[str, Any],
+        condition: Mapping[str, Any] | None = None,
     ) -> Objective | None:
-        wanted_title = _fold(title)
-        signature = _signature(trigger, action)
+        """Même déclencheur, même condition, même action : c'est le même objectif."""
+        signature = _signature(trigger, action, condition)
         for item in self.list_for(owner_id):
-            if (
-                _fold(item.title) == wanted_title
-                or _signature(item.trigger, item.action) == signature
-            ):
+            if _signature(item.trigger, item.action, item.condition) == signature:
                 return item
         return None
+
+    def latest_draft(self, owner_id: int, channel_id: int, since: datetime) -> Objective | None:
+        rows = self._database.fetchall(
+            """
+            SELECT * FROM objectives
+            WHERE owner_id = ? AND status = 'draft' AND created_at >= ?
+            ORDER BY id DESC
+            """,
+            (owner_id, since.isoformat()),
+        )
+        for row in rows:
+            found = _objective(row)
+            if not found.channel_ids or channel_id in found.channel_ids:
+                return found
+        return None
+
+    def recent_drafts(self, limit: int = 50) -> tuple[Objective, ...]:
+        rows = self._database.fetchall(
+            "SELECT * FROM objectives WHERE status = 'draft' ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+        return tuple(_objective(row) for row in rows)
+
+    def expire_drafts(self, before: datetime, now: datetime) -> int:
+        result = self._database.execute(
+            """
+            UPDATE objectives SET status = 'cancelled', version = version + 1, updated_at = ?
+            WHERE status = 'draft' AND created_at < ?
+            """,
+            (now.isoformat(), before.isoformat()),
+        )
+        return result.rowcount
 
     def claim(self, now: datetime) -> Objective | None:
         """Réserve le plus ancien objectif dû. Personne d'autre ne le prend avant la fin du bail."""
@@ -160,16 +194,34 @@ class ObjectiveStore:
         return "start"
 
     def complete_run(
-        self, objective_id: int, key: str, outcome: str, error: str, now: datetime
+        self,
+        objective_id: int,
+        key: str,
+        outcome: str,
+        error: str,
+        now: datetime,
+        summary: str = "",
     ) -> None:
         self._database.execute(
             """
             UPDATE objective_runs
-            SET outcome = ?, finished_at = ?, error = ?
+            SET outcome = ?, finished_at = ?, error = ?, summary = ?
             WHERE objective_id = ? AND activation_key = ?
             """,
-            (outcome, now.isoformat(), error[:300], objective_id, key),
+            (outcome, now.isoformat(), error[:300], summary[:400], objective_id, key),
         )
+
+    def recent_summaries(self, objective_id: int, limit: int = 6) -> tuple[tuple[str, str], ...]:
+        """(date, texte envoyé) des derniers passages, du plus ancien au plus récent."""
+        rows = self._database.fetchall(
+            """
+            SELECT started_at, summary FROM objective_runs
+            WHERE objective_id = ? AND outcome = 'sent' AND summary != ''
+            ORDER BY id DESC LIMIT ?
+            """,
+            (objective_id, limit),
+        )
+        return tuple((str(row["started_at"]), str(row["summary"])) for row in reversed(rows))
 
     def settle(
         self,
@@ -217,12 +269,16 @@ class ObjectiveStore:
         condition: Mapping[str, Any] | None,
         action: Mapping[str, Any],
         next_run_at: datetime | None,
+        deliver: str | None = None,
+        max_fires: int | None = None,
+        state: Mapping[str, Any] | None = None,
     ) -> Objective:
         result = self._database.execute(
             """
             UPDATE objectives
             SET title = ?, trigger_json = ?, condition_json = ?, action_json = ?,
-                next_run_at = ?, lease_until = NULL, version = version + 1, updated_at = ?
+                next_run_at = ?, deliver = ?, max_fires = ?, state_json = ?,
+                lease_until = NULL, version = version + 1, updated_at = ?
             WHERE id = ? AND version = ?
             """,
             (
@@ -231,6 +287,9 @@ class ObjectiveStore:
                 _dump(condition) if condition else None,
                 _dump(action),
                 _iso(next_run_at),
+                deliver or objective.deliver,
+                max_fires,
+                _dump(objective.state if state is None else state),
                 now.isoformat(),
                 objective.id,
                 objective.version,
@@ -292,7 +351,12 @@ def _objective(row: sqlite3.Row) -> Objective:
         state=json.loads(row["state_json"]),
         version=int(row["version"]),
         last_error=str(row["last_error"]),
+        origin_message_id=_optional_int(row["origin_message_id"]),
     )
+
+
+def _optional_int(raw: object) -> int | None:
+    return int(raw) if isinstance(raw, int) and not isinstance(raw, bool) else None
 
 
 def _dump(value: object) -> str:
@@ -322,9 +386,9 @@ def _parse(raw: object) -> datetime | None:
     return moment
 
 
-def _fold(title: str) -> str:
-    return " ".join(title.casefold().split())
-
-
-def _signature(trigger: Mapping[str, Any], action: Mapping[str, Any]) -> str:
-    return _dump({"action": action, "trigger": trigger})
+def _signature(
+    trigger: Mapping[str, Any],
+    action: Mapping[str, Any],
+    condition: Mapping[str, Any] | None,
+) -> str:
+    return _dump({"action": action, "condition": condition or {}, "trigger": trigger})

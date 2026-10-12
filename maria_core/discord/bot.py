@@ -8,8 +8,6 @@ import discord
 from discord.ext import commands
 
 from maria_core.app import App
-from maria_core.capabilities.builtin.polls import PollStore
-from maria_core.db.retention import purge
 from maria_core.discord.chat import ChatCog
 from maria_core.discord.commands.memory import MemoryCommands
 from maria_core.discord.commands.owner import OwnerCommands
@@ -17,12 +15,13 @@ from maria_core.discord.commands.public import PublicCommands
 from maria_core.discord.commands.social import SocialCommands
 from maria_core.discord.directory import DiscordDirectory
 from maria_core.discord.memory_view import restore_proposals
-from maria_core.discord.objectives import DiscordCourier
+from maria_core.discord.objectives import DiscordCourier, restore_drafts
 from maria_core.discord.polls import DiscordPolls
+from maria_core.discord.presence import PresenceCog
 from maria_core.discord.reactions import ReactionCog
 from maria_core.discord.reading import DiscordHistory
 from maria_core.discord.signals import SignalCog
-from maria_core.discord.tabs import restore_tabs
+from maria_core.discord.voice import VoiceCog
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +44,7 @@ class MariaBot(commands.Bot):
             intents=build_intents(),
             help_command=None,
             application_id=app.settings.app_id,
-            allowed_mentions=discord.AllowedMentions(replied_user=False),
+            allowed_mentions=discord.AllowedMentions.none(),
         )
         self.app = app
         self.started_at = datetime.now(UTC)
@@ -53,25 +52,33 @@ class MariaBot(commands.Bot):
         self._housekeeping_task: asyncio.Task[None] | None = None
 
     async def setup_hook(self) -> None:
-        self.app.bind_discord(
+        app = self.app
+        app.bind_discord(
             directory=DiscordDirectory(self),
-            poster=DiscordPolls(self, PollStore(self.app.database)),
+            poster=DiscordPolls(self, app.polls),
             reader=DiscordHistory(self),
         )
-        restore_tabs(self, self.app.tabs)
-        restore_proposals(self, self.app.memory.store.restorable())
-        self.app.objectives.runner.courier = DiscordCourier(self)
-        reactions = ReactionCog(self)
-        self.app.social.reactor = reactions.add
-        self._objectives_task = asyncio.create_task(self.app.objectives.scheduler.run())
+        restore_proposals(self, app.memory.store.restorable())
+        restore_drafts(self, app)
+        app.objectives.runner.courier = DiscordCourier(self)
+        reactions = ReactionCog(self, app)
+        app.social.reactor = reactions.add
+        app.social.usable = reactions.usable
+        app.drafts.reactor = reactions.add
+        self._objectives_task = asyncio.create_task(app.objectives.scheduler.run())
         self._housekeeping_task = asyncio.create_task(self._housekeep())
-        await self.add_cog(OwnerCommands(self))
-        await self.add_cog(ChatCog(self))
-        await self.add_cog(MemoryCommands(self))
-        await self.add_cog(SignalCog(self))
-        await self.add_cog(reactions)
-        await self.add_cog(SocialCommands(self))
-        await self.add_cog(PublicCommands(self))
+        for cog in (
+            OwnerCommands(self),
+            ChatCog(self, app),
+            VoiceCog(self, app),
+            MemoryCommands(self),
+            SignalCog(self, app),
+            reactions,
+            SocialCommands(self),
+            PublicCommands(self),
+            PresenceCog(self, app.settings.data_dir / "statuses.txt"),
+        ):
+            await self.add_cog(cog)
 
     async def close(self) -> None:
         self.app.objectives.scheduler.stop()
@@ -82,7 +89,13 @@ class MariaBot(commands.Bot):
 
     async def _housekeep(self) -> None:
         while True:
-            await _purge(self.app)
+            try:
+                removed = await asyncio.to_thread(self.app.housekeeping)
+            except Exception:
+                logger.exception("Entretien périodique en échec")
+            else:
+                if any(removed.values()):
+                    logger.info("Entretien : %s", removed)
             await asyncio.sleep(_HOUSEKEEPING_SECONDS)
 
     async def on_ready(self) -> None:
@@ -115,13 +128,3 @@ class MariaBot(commands.Bot):
             return
         logger.error("Commande %s échouée", context.command, exc_info=error)
         await context.send("Une erreur est survenue.")
-
-
-async def _purge(app: App) -> None:
-    try:
-        removed = await asyncio.to_thread(purge, app.database, datetime.now(UTC))
-    except Exception:
-        logger.exception("Purge des journaux en échec")
-        return
-    if any(removed.values()):
-        logger.info("Journaux purgés : %s", removed)

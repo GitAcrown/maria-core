@@ -1,6 +1,6 @@
 # maria-core
 
-MARIA est un bot Discord. Elle discute dans les salons, réagit selon l'activité du serveur, retient ce qu'on lui demande de retenir, et envoie des rappels ou des veilles. Un seul processus, une base SQLite, des extensions pour la météo, le foot, les films, la musique et les transports.
+MARIA est un bot Discord. Elle discute dans les salons, réagit selon l'activité du serveur, retient ce qu'on lui demande de retenir, et envoie des rappels, des récaps et des veilles. Un seul processus, une base SQLite, des extensions pour la météo, le foot, les films, la musique, les jeux, YouTube et les transports.
 
 Python 3.13 ou plus récent.
 
@@ -16,7 +16,7 @@ cp .env.example .env
 
 Sous Windows, `tzdata` est tiré par `requirements.txt`. Les outils de test s'installent avec `pip install -e ".[dev]"`.
 
-Renseigne au minimum `TOKEN`, `APP_ID` et `OPENAI_API_KEY` dans `.env`. Les autres clés activent des extensions. Sans clé, l'outil correspondant reste caché. `DATA_DIR` est le dossier de `maria.db` et de l'index Chroma.
+Renseigne au minimum `TOKEN`, `APP_ID` et `OPENAI_API_KEY` dans `.env`. Les autres clés activent des capacités : sans clé, l'outil correspondant reste caché. `TYPESAFE_API_KEY` (JEV) sert aux décisions fines : sans elle, MARIA s'en tient aux règles (pas de réaction spontanée, pas de suivi sur une phrase ambiguë). `DATA_DIR` est le dossier de `maria.db`, de l'index Chroma et de `statuses.txt`.
 
 ## Lancement
 
@@ -25,13 +25,31 @@ python -m maria_core --check --env-file .env
 python -m maria_core --env-file .env
 ```
 
-`--check` ouvre la base et charge les extensions, sans se connecter à Discord.
+`--check` ouvre la base et charge les extensions, sans se connecter à Discord. Après un premier lancement, `5!sync` publie les commandes slash.
 
-Le préfixe par défaut est `5!`. `5!spontaneite` règle le niveau (`off`, `quiet`, `normal`, `chatty`). `5!moi` montre les souvenirs de la personne. `5!why` explique une réaction, réservé au propriétaire du bot.
+## Ce que fait MARIA
 
-MARIA répond dans les salons quand on s'adresse à elle. Un message privé ne lance pas de conversation : il ne sert qu'à recevoir un rappel ou une veille programmés.
+- **Conversation** : mention, réponse à un de ses messages, `@everyone` si le salon l'autorise, son prénom (et en mode greedy, son prénom au milieu d'une phrase). Elle voit les citations de reply, les embeds, les messages transférés, les images, les fichiers texte joints. Un message privé ne lance pas de conversation : il ne sert qu'à recevoir un rappel ou une veille.
+- **Silence choisi** : quand on ne lui pose pas de vraie question, elle peut se contenter d'un emoji. « Réagis à mon message » pose une réaction.
+- **Vocaux** : transcription automatique si le salon l'a activée, ou quand on parle à MARIA ; sinon la réaction 🎙️ transcrit à la demande. La transcription est postée en citation.
+- **Vues** : météo, films, jeux, morceaux, matchs, transports et images s'affichent en cartes Discord (Components v2). MARIA peut aussi composer une vue sur mesure (`render_widget`) ou un tableau (`render_table`).
+- **Objectifs** : rappels (« dans 10 min », « tous les lundis à 9 h »), récaps rédigés avec ses outils, veilles de page ou de prix, écoute d'un mot, d'un sujet ou d'un vocal. Ce qui ne part pas à coup sûr (condition, écoute, veille) est un brouillon : un « oui » ou le bouton le confirme.
+- **Mémoire** : elle retient ce qu'on lui demande, propose ce qui mérite de l'être (bouton Retenir / Ignorer), et ne garde un fait sur quelqu'un d'autre qu'avec l'accord de la personne.
+- **Spontanéité** : réactions sur les messages de ceux qui lui parlent, emojis appris du serveur, suivi d'un échange qui continue.
 
-Si Chroma ne s'installe pas, le bot démarre quand même. La recherche des souvenirs reste lexicale.
+## Commandes
+
+Slash (après `5!sync`) :
+
+| Commande | Rôle |
+|---|---|
+| `/moi`, `/global` | Souvenirs, propositions, oublier, annuler une modification |
+| `/taches` | Objectifs ouverts : pause, reprise, saut, confirmation, suppression |
+| `/info` | Réglages du salon et outils disponibles |
+| `/chatbot mode\|forget\|everyone\|autotranscribe\|python\|spontaneite\|personnalite` | Réglages, modérateurs |
+| `/preferences propositions\|reactions` | Réglages personnels |
+
+Préfixe (`5!` par défaut) : `spontaneite`, `moi`, `global`. Propriétaire : `why <lien>`, `status`, `keys`, `presence`, `plugin load|unload|reload`, `sync`, `update`, `restart`, `shutdown`.
 
 ## Import depuis MARIA_R
 
@@ -42,4 +60,6 @@ python -m maria_core.legacy /chemin/vers/copie-MARIA_R --database data/maria.db
 python -m maria_core.legacy /chemin/vers/copie-MARIA_R --database data/maria.db --write
 ```
 
-Le second passage ne duplique pas les lignes déjà reprises.
+Le second passage ne duplique pas les lignes déjà reprises. Les statuts tournants (`statuses.txt`) et l'index Chroma sont recopiés.
+
+Pour revenir en arrière après la bascule, `python scripts/export_since_cutover.py data/maria.db <date ISO>` liste en JSON les objectifs et souvenirs créés depuis.

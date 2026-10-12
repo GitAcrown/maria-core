@@ -6,7 +6,6 @@ from typing import Any, Literal
 from maria_core.decisions.registry import Decision
 from maria_core.decisions.rules import (
     address_rules,
-    alert_rules,
     ambient_rules,
     condition_rules,
     draft_rules,
@@ -14,10 +13,10 @@ from maria_core.decisions.rules import (
     intent_rules,
     join_rules,
     listen_rules,
-    memory_relevance_rules,
     memory_worth_rules,
     price_rules,
     reaction_rules,
+    topic_rules,
 )
 from maria_core.decisions.types import Question, RuleHit
 
@@ -56,20 +55,6 @@ def builtin_decisions() -> tuple[Decision, ...]:
                 "accept": "Yes, ok, go ahead",
                 "reject": "No, stop, cancel",
                 "ask": "Ambiguous or about something else",
-            },
-        ),
-        _decision(
-            "alert_mode",
-            fallback="generate",
-            threshold=0.6,
-            budget=200,
-            ttl=60,
-            rules=alert_rules,
-            instructions="How should a scheduled alert phrase `instruction` be delivered?",
-            criteria={
-                "verbatim": "Short text to post as written",
-                "ping_only": "Just a ping, no sentence",
-                "generate": "Needs a written recap or search",
             },
         ),
         _decision(
@@ -137,27 +122,20 @@ def builtin_decisions() -> tuple[Decision, ...]:
             criteria={"true": "Stable personal or server fact", "false": "Chatter or one-off"},
         ),
         _decision(
-            "memory_relevance",
-            fallback=False,
-            threshold=0.4,
-            budget=400,
-            ttl=60,
-            rules=memory_relevance_rules,
-            kind="noul",
-            instructions="Is memory `content` relevant to the query `text`?",
-            criteria={"true": "Useful for the reply", "false": "Unrelated"},
-        ),
-        _decision(
             "followup",
             fallback="ignore",
             threshold=0.58,
             budget=400,
             ttl=15,
             rules=followup_rules,
-            instructions="Does `text` continue the bot's previous reply to the same author?",
+            instructions=(
+                "The bot just answered `bot_last` to this author. Does `text` continue that "
+                "exchange with the bot (reply, follow-up question, thanks needing an answer)?"
+            ),
             criteria={
-                "respond": "It continues that exchange",
-                "ignore": "New topic or not for the bot",
+                "respond": "It answers or questions the bot",
+                "react": "An acknowledgement, a nod would do",
+                "ignore": "New topic, or talking to someone else",
             },
         ),
         _decision(
@@ -168,8 +146,11 @@ def builtin_decisions() -> tuple[Decision, ...]:
             ttl=20,
             rules=ambient_rules,
             kind="noul",
-            instructions="Should the bot add an emoji to `text` without being asked?",
-            criteria={"true": "A reaction fits", "false": "Stay quiet"},
+            instructions=(
+                "Friends chat on Discord. Should the bot add an emoji reaction to `text` "
+                "without being asked? Only if it is clearly natural (joke, good news, vibe)."
+            ),
+            criteria={"true": "A reaction clearly fits", "false": "Stay quiet"},
         ),
         _decision(
             "pick_reaction",
@@ -189,8 +170,24 @@ def builtin_decisions() -> tuple[Decision, ...]:
             ttl=20,
             rules=join_rules,
             kind="noul",
-            instructions="Humans already reacted. Should the bot join with the same emoji?",
+            instructions=(
+                "`humans` people reacted `emoji` to `text`. Should the bot join with the same "
+                "emoji, like a friend would?"
+            ),
             criteria={"true": "Join", "false": "Do not"},
+        ),
+        _decision(
+            "topic_match",
+            fallback="ignore",
+            threshold=0.65,
+            budget=600,
+            ttl=30,
+            rules=topic_rules,
+            instructions=(
+                "Someone asked to be alerted when people talk about `topic`. "
+                "Is `message` really about that topic?"
+            ),
+            criteria={"fire": "Clearly about the topic", "ignore": "Not about it"},
         ),
     )
 

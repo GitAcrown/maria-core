@@ -7,6 +7,7 @@ import discord
 from maria_core.app import App
 from maria_core.memory.model import Memory, Proposal
 from maria_core.memory.policy import Actor
+from maria_core.memory.service import render_proposals
 from maria_core.memory.store import MemoryDenied
 from maria_core.objectives.model import Objective, ObjectiveQuota, StaleObjective
 from maria_core.objectives.schedule import describe
@@ -25,17 +26,19 @@ class MemoryView(discord.ui.View):
         memories: tuple[Memory, ...],
         proposals: tuple[Proposal, ...],
         note: str = "",
+        can_manage: bool = False,
     ) -> None:
         super().__init__(timeout=180)
         self.user_id = user_id
         self.guild_id = guild_id
         self.collective = collective
+        self.can_manage = can_manage
         self.note = note
         self.memory_id: int | None = None
         self.proposal_id: int | None = None
         if memories:
             self.add_item(_MemorySelect(memories[:_PAGE]))
-        if proposals and not collective:
+        if proposals:
             self.add_item(_ProposalSelect(proposals[:_PAGE]))
 
     def catalog(
@@ -48,9 +51,9 @@ class MemoryView(discord.ui.View):
             lines.extend(f"- #{item.id} {item.content}" for item in memories[:_PAGE])
         else:
             lines.append("Aucun souvenir.")
-        if proposals and not self.collective:
-            lines.append("Propositions :")
-            lines.extend(f"- #{item.id} {item.content}" for item in proposals[:_PAGE])
+        if proposals:
+            lines.append("Propositions à valider :" if self.collective else "Propositions :")
+            lines.extend(render_proposals(proposals[:_PAGE]))
         if self.note:
             lines.append(self.note)
         return "\n".join(lines)[:2000]
@@ -80,6 +83,21 @@ class MemoryView(discord.ui.View):
     @discord.ui.button(label="Ignorer")
     async def dismiss(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
         await _proposal(interaction, self, accept=False)
+
+    @discord.ui.button(label="Annuler la modif")
+    async def undo(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        if self.memory_id is None:
+            await interaction.response.send_message("Choisis un souvenir.", ephemeral=True)
+            return
+        app = _app(interaction)
+        try:
+            await asyncio.to_thread(
+                app.memory.store.undo, await _actor(interaction), self.memory_id, app.memory.now()
+            )
+        except MemoryDenied as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        await _refresh_memory(interaction, self, "Dernière modification annulée.")
 
     @discord.ui.button(label="Ajouter")
     async def add(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
@@ -125,6 +143,10 @@ class TaskView(discord.ui.View):
     @discord.ui.button(label="Passer")
     async def skip(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
         await _task(interaction, self, "skip", "Occurrence passée.")
+
+    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        await _task(interaction, self, "confirm", "Brouillon activé.")
 
     @discord.ui.button(label="Supprimer", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
@@ -215,12 +237,14 @@ def _heading(collective: bool) -> str:
 async def send_memory(interaction: discord.Interaction, *, collective: bool) -> None:
     app = _app(interaction)
     guild_id = interaction.guild.id if interaction.guild is not None else None
+    actor = await _actor(interaction)
     view = MemoryView(
         user_id=interaction.user.id,
         guild_id=guild_id,
         collective=collective,
         memories=(),
         proposals=(),
+        can_manage=actor.is_owner or actor.is_moderator,
     )
     memories, proposals = await _memory_rows(app, view)
     view = MemoryView(
@@ -229,6 +253,7 @@ async def send_memory(interaction: discord.Interaction, *, collective: bool) -> 
         collective=collective,
         memories=memories,
         proposals=proposals,
+        can_manage=view.can_manage,
     )
     await interaction.response.send_message(
         view.catalog(memories, proposals),
@@ -307,6 +332,7 @@ async def _refresh_memory(interaction: discord.Interaction, view: MemoryView, no
         memories=memories,
         proposals=proposals,
         note=note,
+        can_manage=view.can_manage,
     )
     await interaction.response.edit_message(content=fresh.catalog(memories, proposals), view=fresh)
 
@@ -325,7 +351,10 @@ async def _memory_rows(
         if view.guild_id is None:
             return (), ()
         memories = await asyncio.to_thread(app.memory.store.list_guild, view.guild_id)
-        return memories, ()
+        if not view.can_manage:
+            return memories, ()
+        proposals = await asyncio.to_thread(app.memory.store.open_guild, view.guild_id)
+        return memories, proposals
     memories = await asyncio.to_thread(app.memory.store.list_for, view.user_id)
     proposals = await asyncio.to_thread(app.memory.store.open_for, view.user_id)
     return memories, proposals

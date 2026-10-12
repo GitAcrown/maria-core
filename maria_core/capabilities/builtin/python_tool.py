@@ -1,4 +1,4 @@
-"""run_python : propriétaire seulement, et serveur explicitement activé."""
+"""run_python : ouvert à tous, dans un sous-processus isolé. Un serveur peut le couper."""
 
 import asyncio
 import json
@@ -18,8 +18,8 @@ _TIMEOUT = 4
 def python_capability(database: Database) -> Capability:
     async def run(context: Context, args: Mapping[str, Any]) -> Result:
         if context.guild_id is not None:
-            enabled = await asyncio.to_thread(_enabled, database, context.guild_id)
-            if not enabled:
+            blocked = await asyncio.to_thread(_blocked, database, context.guild_id)
+            if blocked:
                 return Result(ok=False, data={}, error="Python est désactivé sur ce serveur.")
         payload = await asyncio.to_thread(_isolated, str(args.get("code") or ""))
         if "error" in payload:
@@ -32,7 +32,7 @@ def python_capability(database: Database) -> Capability:
             "Exécute un court programme Python (math, statistics, datetime, decimal, json, re). "
             "print() et la dernière expression sont renvoyés. "
             "Pas de fichiers, pas de réseau, pas d'import, 4 secondes. "
-            "Réservé au propriétaire, et désactivé sur un serveur tant que python_enabled vaut 0."
+            "Seulement du Python valide, jamais du langage naturel."
         ),
         parameters={
             "type": "object",
@@ -41,18 +41,30 @@ def python_capability(database: Database) -> Capability:
             },
             "required": ["code"],
         },
-        risk=Risk.DANGEROUS,
+        risk=Risk.EXTERNAL,
         run=run,
         timeout_s=8,
     )
 
 
-def _enabled(database: Database, guild_id: int) -> bool:
+def _blocked(database: Database, guild_id: int) -> bool:
     row = database.fetchone(
-        "SELECT python_enabled FROM guild_settings WHERE guild_id = ?",
+        "SELECT python_blocked FROM guild_settings WHERE guild_id = ?",
         (guild_id,),
     )
-    return row is not None and int(row["python_enabled"]) == 1
+    return row is not None and int(row["python_blocked"]) == 1
+
+
+def set_python(database: Database, guild_id: int, enabled: bool, now: str) -> None:
+    database.execute(
+        """
+        INSERT INTO guild_settings (guild_id, python_blocked, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(guild_id) DO UPDATE SET
+            python_blocked = excluded.python_blocked,
+            updated_at = excluded.updated_at
+        """,
+        (guild_id, 0 if enabled else 1, now),
+    )
 
 
 def _isolated(code: str) -> dict[str, Any]:

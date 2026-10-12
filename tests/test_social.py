@@ -7,6 +7,7 @@ from maria_core.conversation.model import Inbound
 from maria_core.db import Database
 from maria_core.decisions.types import Verdict
 from maria_core.social.baseline import adjust
+from maria_core.social.emojis import learn
 from maria_core.social.score import parts_from
 from maria_core.social.service import Social
 
@@ -26,7 +27,13 @@ class _Engine:
 def _social(tmp_path: Path, engine: _Engine, clock: list[datetime]) -> tuple[Social, Database]:
     database = Database(tmp_path / "maria.db")
     database.migrate()
-    return Social(database, engine, clock=lambda: clock[0]), database
+    social = Social(database, engine, clock=lambda: clock[0])
+    social.reactor = _react
+    return social, database
+
+
+async def _react(_channel_id: int, _message_id: int, _emoji: str) -> bool:
+    return True
 
 
 def _message(**overrides: object) -> Inbound:
@@ -68,8 +75,8 @@ def test_score_depends_only_on_its_inputs() -> None:
         maria_reacted=False,
     )
     assert lively.total() == lively.total()
-    assert round(lively.total(), 3) == 0.95
-    assert quiet.total() < 0.55
+    assert round(lively.total(), 3) == 0.75
+    assert quiet.total() < 0.35
 
 
 async def test_off_stays_silent_without_calling_the_model(tmp_path: Path) -> None:
@@ -91,22 +98,28 @@ async def test_off_stays_silent_without_calling_the_model(tmp_path: Path) -> Non
 
 async def test_budget_and_same_author_block_the_next_reaction(tmp_path: Path) -> None:
     engine = _Engine({"ambient_react": True, "pick_reaction": "0"})
-    social, database = _social(tmp_path, engine, [_NOW])
+    clock = [_NOW]
+    social, database = _social(tmp_path, engine, clock)
     database.execute(
         "INSERT INTO guild_settings (guild_id, spontaneity, updated_at) VALUES (5, 'normal', ?)",
         (_NOW.isoformat(),),
     )
-    social._store.learn(5, "😂", _NOW)
+    learn(database, 5, "😂", "trop drôle", _NOW)
     for author in (7, 8, 9, 11):
         social.room.note(3, author)
+
+    async def consider(author: int, message_id: int) -> str:
+        clock[0] += timedelta(seconds=60)
         social.room.bump_attention(5, author)
         social.room.bump_attention(5, author)
-    assert await social.consider(_message(author_id=7, message_id=10)) == "😂"
-    assert await social.consider(_message(author_id=7, message_id=14)) == ""
+        return await social.consider(_message(author_id=author, message_id=message_id))
+
+    assert await consider(7, 10) == "😂"
+    assert await consider(7, 14) == ""
     assert social.explain(14).endswith("same_author.")
-    assert await social.consider(_message(author_id=8, message_id=11)) == "😂"
-    assert await social.consider(_message(author_id=9, message_id=12)) == "😂"
-    assert await social.consider(_message(author_id=11, message_id=13)) == "😂"
+    assert await consider(8, 11) == "😂"
+    assert await consider(9, 12) == "😂"
+    assert await consider(11, 13) == "😂"
     database.close()
 
 
@@ -114,14 +127,14 @@ async def test_followup_respects_the_level(tmp_path: Path) -> None:
     engine = _Engine({"followup": "respond"})
     clock = [_NOW]
     social, database = _social(tmp_path, engine, clock)
-    social.note_reply(_message())
+    social.note_reply(_message(), "voilà")
     clock[0] = _NOW + timedelta(seconds=5)
-    assert await social.wants_followup(_message(message_id=12, text="et donc"))
+    assert await social.wants_followup(_message(message_id=12, text="et donc")) == "respond"
     database.execute(
         "INSERT INTO guild_settings (guild_id, spontaneity, updated_at) VALUES (5, 'off', ?)",
         (_NOW.isoformat(),),
     )
-    assert not await social.wants_followup(_message(message_id=13, text="et donc"))
+    assert await social.wants_followup(_message(message_id=13, text="et donc")) == "ignore"
     database.close()
 
 
@@ -134,11 +147,12 @@ def test_a_busy_hour_raises_the_threshold_and_a_quiet_one_lowers_it() -> None:
 async def test_a_busy_habit_makes_the_same_liveliness_stay_quiet(tmp_path: Path) -> None:
     engine = _Engine({"ambient_react": True})
     social, database = _social(tmp_path, engine, [_NOW])
-    social._store.learn(5, "😂", _NOW)
+    learn(database, 5, "😂", "", _NOW)
     for author in (7, 8, 9, 11):
         social.room.note(3, author)
+    social.room.bump_attention(5, 7)
     _habit(database, messages=4, today=40)
-    assert await social.consider(_message()) == ""
+    assert await social.consider(_message(text="ah ok")) == ""
     assert engine.calls == []
     assert "below" in social.explain(10)
     database.close()
@@ -147,11 +161,36 @@ async def test_a_busy_habit_makes_the_same_liveliness_stay_quiet(tmp_path: Path)
 async def test_a_quiet_habit_lets_a_small_reaction_through(tmp_path: Path) -> None:
     engine = _Engine({"ambient_react": True})
     social, database = _social(tmp_path, engine, [_NOW])
-    social._store.learn(5, "😂", _NOW)
+    learn(database, 5, "😂", "", _NOW)
     social.room.note(3, 7)
+    social.room.bump_attention(5, 7)
     _habit(database, messages=40, today=1)
     assert await social.consider(_message(message_id=20, text="oh !")) == "😂"
-    assert engine.calls == ["ambient_react"]
+    assert engine.calls == ["ambient_react", "pick_reaction"]
+
+
+async def test_a_cold_author_gets_no_ambient_reaction(tmp_path: Path) -> None:
+    engine = _Engine({"ambient_react": True})
+    social, database = _social(tmp_path, engine, [_NOW])
+    social.room.note(3, 7)
+    assert await social.consider(_message()) == ""
+    assert engine.calls == []
+    assert "cold" in social.explain(10)
+    database.close()
+
+
+async def test_a_chain_of_replies_resets_after_a_pause(tmp_path: Path) -> None:
+    engine = _Engine({"followup": "respond"})
+    clock = [_NOW]
+    social, database = _social(tmp_path, engine, clock)
+    for _ in range(5):
+        social.note_reply(_message(), "oui")
+        clock[0] += timedelta(seconds=10)
+    assert await social.wants_followup(_message(text="et donc")) == "ignore"
+    clock[0] += timedelta(hours=1)
+    social.note_reply(_message(), "oui")
+    clock[0] += timedelta(seconds=5)
+    assert await social.wants_followup(_message(text="et donc")) == "respond"
     database.close()
 
 

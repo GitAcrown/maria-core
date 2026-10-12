@@ -122,13 +122,14 @@ async def test_a_direct_message_does_not_call_the_model(tmp_path: Path) -> None:
 async def test_voice_is_transcribed_when_addressed(tmp_path: Path) -> None:
     client = ScriptedClient([Completion(text="entendu", model="fake")], transcript="il fait beau")
     service, database = _open(tmp_path, client)
-    reply = await service.handle(
-        _message(
-            mentioned=True,
-            text="",
-            audio=AudioRef(filename="voice.ogg", size=5, load=_load_audio),
-        )
+    voice = _message(
+        mentioned=True,
+        text="",
+        audio=AudioRef(filename="voice.ogg", size=5, load=_load_audio),
     )
+    transcript = await service.transcribe(voice.audio)
+    assert transcript == "il fait beau"
+    reply = await service.handle(voice.with_text(transcript, transcribed=True))
     assert reply is not None
     assert reply.chunks == ("entendu",)
     assert "il fait beau" in str(client.seen[0])
@@ -259,9 +260,11 @@ class _VerdictEngine:
     def __init__(self, value: str) -> None:
         self.value = value
         self.calls = 0
+        self.names: list[str] = []
 
     async def resolve(self, name: str, state: dict[str, object]) -> Verdict:
         self.calls += 1
+        self.names.append(name)
         return Verdict(name=name, value=self.value, path="model", confidence=0.9)
 
 
@@ -276,7 +279,7 @@ async def test_ambiguous_name_follows_the_decision(tmp_path: Path) -> None:
         """
     )
     reply = await service.handle(_message(text="faut que Maria range ça"))
-    assert engine.calls == 1
+    assert engine.names[0] == "addressed_to_bot"
     assert reply is not None
     assert reply.chunks == ("je suis là",)
     database.close()

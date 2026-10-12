@@ -1,4 +1,7 @@
-"""Prochaine échéance, en heure de Paris. Un changement d'heure ne décale pas l'heure locale."""
+"""Prochaine échéance, en heure de Paris. Un changement d'heure ne décale pas l'heure locale.
+
+Une date sans fuseau est une heure de Paris : c'est ainsi que les gens et le modèle l'écrivent.
+"""
 
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -75,17 +78,65 @@ def weekdays(raw: object) -> tuple[str, ...]:
     return tuple(found)
 
 
+_FR_DAYS = {
+    "mon": "lundi",
+    "tue": "mardi",
+    "wed": "mercredi",
+    "thu": "jeudi",
+    "fri": "vendredi",
+    "sat": "samedi",
+    "sun": "dimanche",
+}
+_SIGNALS = {
+    "join": "quand quelqu'un rejoint un vocal",
+    "leave": "quand quelqu'un quitte un vocal",
+    "stream": "quand quelqu'un lance un stream",
+}
+
+
 def describe(trigger: Mapping[str, Any]) -> str:
     kind = str(trigger.get("type") or "")
     if kind == "daily":
         return f"tous les jours à {trigger.get('time', '09:00')}"
     if kind == "weekly":
-        days = ", ".join(weekdays(trigger.get("weekdays"))) or "un jour"
-        return f"chaque {days} à {trigger.get('time', '09:00')}"
+        days = ", ".join(_FR_DAYS.get(day, day) for day in weekdays(trigger.get("weekdays")))
+        return f"chaque {days or 'semaine'} à {trigger.get('time', '09:00')}"
     if kind == "interval":
-        return f"toutes les {max(1, _int(trigger.get('every_s'), 3600) // 60)} min"
+        return _every(_int(trigger.get("every_s"), 3600))
     if kind == "at":
-        return f"le {trigger.get('at', '')}"
+        return f"le {local_text(trigger.get('at'))}"
+    return _describe_event(kind, trigger)
+
+
+def local_text(raw: object) -> str:
+    try:
+        moment = _moment(raw).astimezone(PARIS)
+    except ValueError:
+        return str(raw or "")
+    return f"{moment:%d/%m/%Y à %H:%M}"
+
+
+def _every(seconds: int) -> str:
+    minutes = max(1, seconds // 60)
+    if minutes % 1440 == 0:
+        return f"tous les {minutes // 1440} j"
+    if minutes % 60 == 0:
+        return f"toutes les {minutes // 60} h"
+    return f"toutes les {minutes} min"
+
+
+def _describe_event(kind: str, trigger: Mapping[str, Any]) -> str:
+    if kind == "on_topic":
+        topic = trigger.get("topic") or trigger.get("pattern") or "?"
+        return f"quand on parle de « {topic} »"
+    if kind == "on_voice":
+        return _SIGNALS.get(str(trigger.get("signal") or "join"), "vocal")
+    if kind == "on_member_join":
+        return "quand un membre arrive"
+    if kind == "on_message":
+        return "à chaque message du salon"
+    if kind == "on_reply_to":
+        return "quand on répond à MARIA"
     return kind
 
 
@@ -128,16 +179,22 @@ def _hhmm(text: str) -> tuple[int, int]:
     return hour, minute
 
 
+def moment_of(raw: object) -> datetime:
+    """Date ISO ; sans fuseau, c'est l'heure de Paris."""
+    return _moment(raw)
+
+
 def _moment(raw: object) -> datetime:
     if isinstance(raw, datetime):
         moment = raw
     else:
+        text = str(raw or "").strip().replace(" ", "T", 1)
         try:
-            moment = datetime.fromisoformat(str(raw))
+            moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError as exc:
-            raise ValueError(f"Date illisible : {raw}") from exc
+            raise ValueError(f"Date illisible : {raw}. Format attendu : 2026-10-12T20:00") from exc
     if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
+        moment = moment.replace(tzinfo=PARIS)
     return moment.astimezone(UTC)
 
 

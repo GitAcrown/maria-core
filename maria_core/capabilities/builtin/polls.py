@@ -59,6 +59,40 @@ class PollStore:
             ),
         )
 
+    def active_for_channel(self, channel_id: int, now: datetime) -> tuple[StoredPoll, ...]:
+        rows = self._database.fetchall(
+            """
+            SELECT message_id, question, options_json, expires_at FROM polls
+            WHERE channel_id = ? AND expires_at > ?
+            ORDER BY created_at DESC LIMIT 3
+            """,
+            (channel_id, now.isoformat()),
+        )
+        return tuple(
+            StoredPoll(
+                message_id=int(row["message_id"]),
+                question=str(row["question"]),
+                options=tuple(json.loads(row["options_json"])),
+                expires_at=str(row["expires_at"]),
+            )
+            for row in rows
+        )
+
+
+def poll_context(store: PollStore, channel_id: int) -> str:
+    """Sondages ouverts du salon, pour que MARIA sache qu'ils existent sans voter."""
+    polls = store.active_for_channel(channel_id, datetime.now(UTC))
+    if not polls:
+        return ""
+    lines = []
+    for poll in polls:
+        stamp = int(datetime.fromisoformat(poll.expires_at).timestamp())
+        lines.append(f"- « {poll.question} » ({', '.join(poll.options)}) — clôture <t:{stamp}:R>")
+    return (
+        "SONDAGES OUVERTS DANS CE SALON (tu ne votes jamais, résultats invisibles avant la "
+        "clôture) :\n" + "\n".join(lines)
+    )
+
 
 def poll_capability(poster: PollPoster) -> Capability:
     async def run(context: Context, args: Mapping[str, Any]) -> Result:

@@ -55,7 +55,10 @@ class ChromaIndex:
         except Exception:
             logger.warning("Index : suppression ignorée pour %s", memory_id, exc_info=True)
 
-    def search(self, text: str, *, limit: int) -> tuple[int, ...]:
+    def search(
+        self, text: str, *, limit: int, max_distance: float | None = None
+    ) -> tuple[int, ...]:
+        """Les plus proches voisins ; au-delà de `max_distance` (cosinus), rien n'est rendu."""
         cleaned = text.strip()
         if not cleaned or limit < 1:
             return ()
@@ -64,7 +67,9 @@ class ChromaIndex:
         except Exception:
             logger.warning("Index : recherche ignorée", exc_info=True)
             return ()
-        return _identifiers(found)
+        if max_distance is None:
+            return _identifiers(found)
+        return _close(found, max_distance)
 
     def move(self, old_id: str, memory_id: int) -> bool:
         target = str(memory_id)
@@ -142,6 +147,31 @@ def _identifiers(payload: object) -> tuple[int, ...]:
         if isinstance(item, str) and item.isdigit():
             found.append(int(item))
     return tuple(found)
+
+
+def _close(payload: object, max_distance: float) -> tuple[int, ...]:
+    ids = _first(_field(payload, "ids"))
+    distances = _first(_field(payload, "distances"))
+    if len(distances) != len(ids):
+        return _identifiers(payload)
+    found: list[int] = []
+    for raw, distance in zip(ids, distances, strict=True):
+        if isinstance(raw, str) and raw.isdigit() and _number(distance) <= max_distance:
+            found.append(int(raw))
+    return tuple(found)
+
+
+def _first(rows: list[object]) -> list[object]:
+    if rows and isinstance(rows[0], list):
+        return list(rows[0])
+    return rows
+
+
+def _number(raw: object) -> float:
+    try:
+        return float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return float("inf")
 
 
 def _vector(payload: object) -> list[float] | None:

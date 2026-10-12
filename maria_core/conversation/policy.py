@@ -18,7 +18,7 @@ def load_policy(database: Database, message: Inbound) -> Policy:
         SELECT respond_everyone, auto_transcribe
         FROM channel_settings WHERE channel_id = ?
         """,
-        (message.channel_id,),
+        (message.policy_channel_id,),
     )
     return Policy(
         mode=_mode(guild),
@@ -41,6 +41,19 @@ def save_mode(database: Database, guild_id: int, mode: str, now: str) -> str:
         (guild_id, chosen.value, now),
     )
     return chosen.value
+
+
+def save_personality(database: Database, guild_id: int, text: str, now: str) -> None:
+    database.execute(
+        """
+        INSERT INTO guild_settings (guild_id, personality, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(guild_id) DO UPDATE SET
+            personality = excluded.personality,
+            updated_at = excluded.updated_at
+        """,
+        (guild_id, text, now),
+    )
 
 
 def save_everyone(database: Database, channel_id: int, guild_id: int, enabled: bool) -> None:

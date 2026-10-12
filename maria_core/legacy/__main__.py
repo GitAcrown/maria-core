@@ -1,6 +1,7 @@
 """`python -m maria_core.legacy <copie> --database <base>`."""
 
 import argparse
+import shutil
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,9 +33,21 @@ def main(argv: list[str] | None = None) -> int:
         database.migrate()
         print(apply(database, scan(args.root, now=now), now=now).text())
         print(adopt(args.root / "data" / "chroma", args.database.parent / "chroma", database))
+        print(_statuses(args.root / "data" / "statuses.txt", args.database.parent))
     finally:
         database.close()
     return 0
+
+
+def _statuses(source: Path, folder: Path) -> str:
+    """Les statuts tournants de MARIA_R, recopiés s'il n'y en a pas déjà."""
+    target = folder / "statuses.txt"
+    if not source.is_file():
+        return "Pas de statuts à reprendre."
+    if target.exists():
+        return "Statuts déjà présents, conservés."
+    shutil.copyfile(source, target)
+    return "Statuts repris."
 
 
 def _now(raw: str) -> datetime | None:

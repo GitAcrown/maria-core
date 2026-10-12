@@ -1,4 +1,4 @@
-"""Plafonds : objectifs ouverts par personne, lectures web par jour."""
+"""Plafonds : objectifs ouverts par personne, lectures web par jour et par serveur."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -6,6 +6,8 @@ from maria_core.db import Database
 
 MAX_OPEN = 10
 MAX_FETCHES_PER_DAY = 40
+MIN_FETCH_INTERVAL_S = 6 * 3600
+STORM_PER_HOUR = 3
 
 
 def open_count(database: Database, owner_id: int) -> int:
@@ -16,32 +18,47 @@ def open_count(database: Database, owner_id: int) -> int:
         """,
         (owner_id,),
     )
-    if row is None:
-        return 0
-    return int(row["n"])
+    return 0 if row is None else int(row["n"])
 
 
-def fetches_today(database: Database, now: datetime) -> int:
-    start = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+def budget_key(guild_id: int | None, owner_id: int) -> str:
+    return f"guild:{guild_id}" if guild_id is not None else f"user:{owner_id}"
+
+
+def fetches_today(database: Database, key: str, now: datetime) -> int:
+    row = database.fetchone(
+        "SELECT COUNT(*) AS n FROM objective_fetches WHERE budget_key = ? AND at >= ?",
+        (key, _day_start(now).isoformat()),
+    )
+    return 0 if row is None else int(row["n"])
+
+
+def take_fetch(database: Database, objective_id: int, key: str, now: datetime) -> bool:
+    """Réserve une lecture web. Chaque lecture compte, que la condition soit vraie ou non."""
+    with database.transaction():
+        if fetches_today(database, key, now) >= MAX_FETCHES_PER_DAY:
+            return False
+        database.execute(
+            "INSERT INTO objective_fetches (at, objective_id, budget_key) VALUES (?, ?, ?)",
+            (now.isoformat(), objective_id, key),
+        )
+    return True
+
+
+def fires_last_hour(database: Database, objective_id: int, now: datetime) -> int:
     row = database.fetchone(
         """
-        SELECT COUNT(*) AS n FROM objective_runs AS runs
-        JOIN objectives ON objectives.id = runs.objective_id
-        WHERE runs.started_at >= ?
-          AND runs.outcome = 'sent'
-          AND objectives.action_json LIKE '%"fetch_then"%'
+        SELECT COUNT(*) AS n FROM objective_runs
+        WHERE objective_id = ? AND outcome = 'sent' AND started_at >= ?
         """,
-        (start.isoformat(),),
+        (objective_id, (now - timedelta(hours=1)).isoformat()),
     )
-    if row is None:
-        return 0
-    return int(row["n"])
-
-
-def fetches_allowed(database: Database, now: datetime) -> bool:
-    return fetches_today(database, now) < MAX_FETCHES_PER_DAY
+    return 0 if row is None else int(row["n"])
 
 
 def next_budget_day(now: datetime) -> datetime:
-    start = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    return start + timedelta(days=1)
+    return _day_start(now) + timedelta(days=1)
+
+
+def _day_start(now: datetime) -> datetime:
+    return now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)

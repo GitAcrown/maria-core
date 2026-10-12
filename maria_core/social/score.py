@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from maria_core.social.room import ATTENTION_HOT, FATIGUE_EXHAUSTED
+
 
 @dataclass(frozen=True, slots=True)
 class Parts:
@@ -43,11 +45,12 @@ def parts_from(
     fatigue: float,
     maria_reacted: bool,
 ) -> Parts:
+    """L'attention envers l'auteur pèse le plus : MARIA réagit surtout à qui lui parle."""
     return Parts(
-        activity=min(max(humans, 0), 4) / 4 * 0.35,
+        activity=min(max(humans, 0), 4) / 4 * 0.15,
         reactions=min(max(human_reactions, 0), 3) / 3 * 0.25,
-        expressive=0.3 if expressive else 0.0,
-        attention=min(max(attention, 0.0), 2.0) / 2 * 0.3,
-        fatigue=min(max(fatigue, 0.0), 4.0) / 4 * 0.45,
-        recent=0.25 if maria_reacted else 0.0,
+        expressive=0.15 if expressive else 0.0,
+        attention=min(max(attention, 0.0), ATTENTION_HOT) / ATTENTION_HOT * 0.45,
+        fatigue=min(max(fatigue, 0.0), FATIGUE_EXHAUSTED) / FATIGUE_EXHAUSTED * 0.45,
+        recent=0.2 if maria_reacted else 0.0,
     )
