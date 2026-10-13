@@ -12,6 +12,7 @@ from maria_core.objectives.compile import (
     compile_trigger,
     is_conditional,
 )
+from maria_core.objectives.labels import kind_label, op_label
 from maria_core.objectives.model import Objective, ObjectiveQuota, StaleObjective
 from maria_core.objectives.schedule import EVENT_TRIGGERS, describe, first_due, next_due
 from maria_core.objectives.schemas import create_schema, update_schema
@@ -119,7 +120,7 @@ def _update(service: Any) -> Callable[[Context, Mapping[str, Any]], Any]:
             saved = apply(service, objective, args)
         except (StaleObjective, ValueError) as exc:
             return Result(ok=False, data={}, error=str(exc))
-        return Result(ok=True, data=public(saved))
+        return Result(ok=True, data={**public(saved), "done": op_label(str(args.get("op") or ""))})
 
     return run
 
@@ -249,6 +250,7 @@ def public(objective: Objective) -> dict[str, Any]:
     return {
         "id": objective.id,
         "title": objective.title,
+        "kind": kind_label(objective.trigger, objective.action, objective.condition),
         "status": objective.status,
         "when": describe(objective.trigger),
         "condition": dict(objective.condition) if objective.condition else None,

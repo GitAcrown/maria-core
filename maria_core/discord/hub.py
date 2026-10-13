@@ -1,0 +1,170 @@
+"""Menus Components v2 comme dans MARIA_R : un conteneur, un état, `build()` à chaque clic."""
+
+import logging
+from collections.abc import Awaitable, Callable, Sequence
+
+import discord
+
+from maria_core.discord.layout import quiet_links
+
+logger = logging.getLogger(__name__)
+
+NO_PINGS = discord.AllowedMentions.none()
+MENU_TIMEOUT = 840.0
+
+type Run = Callable[[discord.Interaction], Awaitable[None]]
+type Pick = Callable[[discord.Interaction, str], Awaitable[None]]
+
+
+class Hub(discord.ui.LayoutView):
+    """Base des menus éphémères. Seule la personne qui l'a ouvert peut cliquer."""
+
+    def __init__(self, *, viewer_id: int, timeout: float | None = MENU_TIMEOUT) -> None:
+        super().__init__(timeout=timeout)
+        self.viewer_id = viewer_id
+        self.message: discord.InteractionMessage | None = None
+
+    def build(self) -> None:
+        raise NotImplementedError
+
+    def set_layout(self, body: Sequence[discord.ui.Item], *rows: discord.ui.ActionRow) -> None:
+        """Le contenu, un trait fin, puis les contrôles, dans un seul conteneur."""
+        self.clear_items()
+        children = list(body)
+        if rows:
+            children.append(thin())
+            children.extend(rows)
+        self.add_item(discord.ui.Container(*children))
+
+    async def open(self, interaction: discord.Interaction) -> None:
+        self.build()
+        if interaction.response.is_done():
+            await interaction.followup.send(view=self, ephemeral=True, allowed_mentions=NO_PINGS)
+        else:
+            await interaction.response.send_message(
+                view=self, ephemeral=True, allowed_mentions=NO_PINGS
+            )
+        try:
+            self.message = await interaction.original_response()
+        except discord.HTTPException:
+            self.message = None
+
+    async def refresh(self, interaction: discord.Interaction) -> None:
+        self.build()
+        if interaction.response.is_done():
+            await interaction.edit_original_response(view=self, allowed_mentions=NO_PINGS)
+        else:
+            await interaction.response.edit_message(view=self, allowed_mentions=NO_PINGS)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.viewer_id:
+            return True
+        await interaction.response.send_message("Ce menu n'est pas le tien.", ephemeral=True)
+        return False
+
+    async def on_error(
+        self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item
+    ) -> None:
+        logger.error("Menu %s en échec", type(self).__name__, exc_info=error)
+        text = "**Erreur** · le bouton a planté, réessaie."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(text, ephemeral=True)
+            else:
+                await interaction.response.send_message(text, ephemeral=True)
+        except discord.HTTPException:
+            logger.debug("Erreur de menu non signalée", exc_info=True)
+
+    async def on_timeout(self) -> None:
+        for item in self.walk_children():
+            if isinstance(item, discord.ui.Button | discord.ui.Select):
+                item.disabled = True
+        if self.message is None:
+            return
+        try:
+            await self.message.edit(view=self, allowed_mentions=NO_PINGS)
+        except discord.HTTPException:
+            logger.debug("Menu expiré non modifié", exc_info=True)
+
+
+class Action(discord.ui.Button):
+    """Un bouton qui appelle une fonction : évite une classe par bouton."""
+
+    def __init__(
+        self,
+        label: str,
+        run: Run,
+        *,
+        style: discord.ButtonStyle = discord.ButtonStyle.secondary,
+        disabled: bool = False,
+    ) -> None:
+        super().__init__(label=label, style=style, disabled=disabled)
+        self.run = run
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.run(interaction)
+
+
+class Picker(discord.ui.Select):
+    def __init__(self, placeholder: str, options: list[discord.SelectOption], run: Pick) -> None:
+        super().__init__(placeholder=placeholder, options=options[:25])
+        self.run = run
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.run(interaction, self.values[0])
+
+
+def title(text: str, meta: str = "") -> discord.ui.TextDisplay:
+    """Titre `##` et ligne `-#` dans le même bloc."""
+    return discord.ui.TextDisplay(f"## {text}\n-# {meta}" if meta else f"## {text}")
+
+
+def body(text: str) -> discord.ui.TextDisplay:
+    return discord.ui.TextDisplay(quiet_links(text.strip()[:3900]) or "-# (vide)")
+
+
+def wide() -> discord.ui.Separator:
+    return discord.ui.Separator(spacing=discord.SeparatorSpacing.large)
+
+
+def thin() -> discord.ui.Separator:
+    return discord.ui.Separator(spacing=discord.SeparatorSpacing.small)
+
+
+def option(value: int | str, label: str, description: str = "") -> discord.SelectOption:
+    shown = " ".join(label.split())[:100] or str(value)
+    return discord.SelectOption(
+        label=shown, value=str(value), description=" ".join(description.split())[:100] or None
+    )
+
+
+def clip(text: str, limit: int) -> str:
+    flat = " ".join((text or "").split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def pages(count: int, size: int) -> int:
+    return max(1, (count + size - 1) // size)
+
+
+def card(heading: str, text: str = "", *, meta: str = "") -> discord.ui.LayoutView:
+    """Réponse simple d'une commande : un titre, un trait, le contenu."""
+    view = discord.ui.LayoutView(timeout=None)
+    items: list[discord.ui.Item] = [title(heading, meta)]
+    if text.strip():
+        items += [wide(), body(text)]
+    view.add_item(discord.ui.Container(*items))
+    return view
+
+
+async def answer(
+    interaction: discord.Interaction, heading: str, text: str = "", *, meta: str = ""
+) -> None:
+    """Réponse éphémère d'une commande, en carte."""
+    view = card(heading, text, meta=meta)
+    if interaction.response.is_done():
+        await interaction.followup.send(view=view, ephemeral=True, allowed_mentions=NO_PINGS)
+    else:
+        await interaction.response.send_message(
+            view=view, ephemeral=True, allowed_mentions=NO_PINGS
+        )

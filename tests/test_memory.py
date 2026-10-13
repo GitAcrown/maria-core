@@ -292,3 +292,24 @@ async def test_chatter_is_not_proposed_even_if_the_decision_says_yes(tmp_path: P
 class _Yes:
     async def resolve(self, name: str, state: dict[str, object]) -> Verdict:
         return Verdict(name=name, value=True, path="rules", confidence=1)
+
+
+def test_profile_keeps_identity_facts_first(tmp_path: Path) -> None:
+    book, database = _book(tmp_path)
+    facts = ["Lea habite a Lyon", "Lea aime le the", "Lea joue a Zelda", "Lea a un chat"]
+    for index, content in enumerate(facts):
+        book.store.remember(
+            _actor(),
+            scope="user",
+            subject_id=7,
+            guild_id=5,
+            content=content,
+            source="explicit",
+            now=_NOW + timedelta(minutes=index),
+        )
+    for _ in range(3):
+        book.context_for(7, 5, "quel temps fait-il ?")
+    profile = book.store.profile(7, limit=3)
+    assert profile[0].content == "Lea habite a Lyon"
+    assert "Lea habite a Lyon" in book.context_for(7, 5, "météo chez moi")
+    database.close()

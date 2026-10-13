@@ -12,7 +12,7 @@ from maria_core.memory.rows import (
     proposal_row,
     visible,
 )
-from maria_core.memory.text import close, match_query, normalize
+from maria_core.memory.text import close, identity_fact, match_query, normalize
 from maria_core.vectors.index import VectorIndex
 
 PROPOSAL_DAYS = 14
@@ -129,16 +129,10 @@ class MemoryStore:
         return tuple(shown[:limit])
 
     def profile(self, user_id: int, *, limit: int = 3) -> tuple[Memory, ...]:
-        rows = self._database.fetchall(
-            """
-            SELECT * FROM memories
-            WHERE deleted_at IS NULL AND scope = 'user' AND subject_id = ?
-            ORDER BY COALESCE(last_used_at, updated_at) DESC
-            LIMIT ?
-            """,
-            (user_id, limit),
-        )
-        return tuple(memory_row(row) for row in rows)
+        """Faits d'identité d'abord (ville, âge, métier…), puis les plus récents."""
+        pool = self.list_for(user_id, limit=max(limit * 4, 40))
+        ranked = sorted(pool, key=lambda item: not identity_fact(item.content))
+        return tuple(ranked[:limit])
 
     def list_self(self, limit: int = 6) -> tuple[Memory, ...]:
         rows = self._database.fetchall(
@@ -152,15 +146,24 @@ class MemoryStore:
         )
         return tuple(memory_row(row) for row in rows)
 
-    def list_for(self, user_id: int) -> tuple[Memory, ...]:
-        return self.profile(user_id, limit=20)
+    def list_for(self, user_id: int, limit: int = 200) -> tuple[Memory, ...]:
+        rows = self._database.fetchall(
+            """
+            SELECT * FROM memories
+            WHERE deleted_at IS NULL AND scope = 'user' AND subject_id = ?
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        )
+        return tuple(memory_row(row) for row in rows)
 
     def list_guild(self, guild_id: int) -> tuple[Memory, ...]:
         rows = self._database.fetchall(
             """
             SELECT * FROM memories
             WHERE deleted_at IS NULL AND scope = 'guild' AND guild_id = ?
-            ORDER BY updated_at DESC LIMIT 20
+            ORDER BY updated_at DESC LIMIT 200
             """,
             (guild_id,),
         )

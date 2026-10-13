@@ -153,6 +153,13 @@ class ConversationService:
     def forget_channel(self, channel_id: int) -> None:
         self._histories.pop(channel_id, None)
 
+    def usage(self, channel_id: int) -> tuple[int, int, int]:
+        """Messages et tokens de l'historique du salon, et le plafond."""
+        history = self._histories.get(channel_id)
+        if history is None:
+            return 0, 0, self._limits[1]
+        return history.usage()
+
     def transcript(self, channel_id: int) -> tuple[str, ...]:
         history = self._histories.get(channel_id)
         if history is None:

@@ -26,6 +26,7 @@ from maria_core.llm.client import OpenAIChatClient
 from maria_core.llm.prompt import PromptSections
 from maria_core.memory import Memories
 from maria_core.memory.service import label
+from maria_core.memory.summary import MemorySummaries
 from maria_core.objectives import Objectives, ObjectiveSignal
 from maria_core.objectives.drafts import Drafts
 from maria_core.objectives.fetch import brave_searcher, http_fetcher
@@ -65,6 +66,7 @@ class App:
         self.llm = OpenAIChatClient(settings.openai_api_key)
         self.polls = PollStore(database)
         self.memory = Memories(database, _index(settings), engine=self.engine)
+        self.memory_summaries = MemorySummaries(self.llm)
         self.social = Social(database, self.engine)
         self.objectives = Objectives(database, fetcher=http_fetcher(self.http), judge=self._judge)
         self.objectives.pipeline.searcher = brave_searcher(self.http, settings.brave_api_key)

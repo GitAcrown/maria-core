@@ -8,10 +8,10 @@ from discord.ext import commands
 
 from maria_core.app import App
 from maria_core.conversation.model import Inbound, Reply
+from maria_core.discord.draft_view import send_draft
 from maria_core.discord.inbound import inbound_from_message
 from maria_core.discord.layout import build_views, quiet_links
 from maria_core.discord.memory_view import ProposalView
-from maria_core.discord.objectives import ConfirmView
 from maria_core.discord.voice import prepare_voice
 from maria_core.objectives.signals import ObjectiveSignal
 
@@ -69,6 +69,8 @@ class ChatCog(commands.Cog):
                 last = await _send_extra(message.channel, extra) or last
         else:
             first, last = await _send_chunks(message.channel, reply, anchor, extra)
+        if reply.draft_objective_id is not None:
+            await send_draft(message.channel, self.app, reply.draft_objective_id)
         if first is not None:
             self.app.conversation.remember_reply(reply.user_message_id, first)
         if reply.proposal_id is not None and last is not None:
@@ -142,7 +144,7 @@ async def _send_chunks(
 
 async def _send_extra(channel: discord.abc.Messageable, view: discord.ui.View) -> int | None:
     try:
-        sent = await channel.send("-# Confirmer ?", view=view, allowed_mentions=SILENT)
+        sent = await channel.send("-# Retenir ?", view=view, allowed_mentions=SILENT)
     except discord.HTTPException:
         return None
     return sent.id
@@ -165,8 +167,6 @@ async def _try_edit(message: discord.Message, reply: Reply) -> bool:
 
 
 def _extra_view(reply: Reply) -> discord.ui.View | None:
-    if reply.draft_objective_id is not None:
-        return ConfirmView(reply.draft_objective_id)
     if reply.proposal_id is not None:
         return ProposalView(reply.proposal_id)
     return None

@@ -14,9 +14,10 @@ from maria_core.discord.commands.owner import OwnerCommands
 from maria_core.discord.commands.public import PublicCommands
 from maria_core.discord.commands.social import SocialCommands
 from maria_core.discord.directory import DiscordDirectory
+from maria_core.discord.draft_view import restore_drafts
 from maria_core.discord.layout import use_emojis
 from maria_core.discord.memory_view import restore_proposals
-from maria_core.discord.objectives import DiscordCourier, restore_drafts
+from maria_core.discord.objectives import DiscordCourier
 from maria_core.discord.polls import DiscordPolls
 from maria_core.discord.presence import PresenceCog
 from maria_core.discord.reactions import ReactionCog

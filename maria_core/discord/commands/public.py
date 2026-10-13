@@ -15,7 +15,9 @@ from maria_core.conversation.policy import (
     save_personality,
     save_transcribe,
 )
-from maria_core.discord.menus import send_memory, send_tasks
+from maria_core.discord.hub import answer, card
+from maria_core.discord.memory_menu import open_memory
+from maria_core.discord.task_menu import open_tasks
 from maria_core.social.levels import LEVELS, set_level, set_member_level
 
 _MODES = [
@@ -44,7 +46,7 @@ class PublicCommands(commands.Cog):
 
     @app_commands.command(name="moi", description="Tes souvenirs et tes propositions")
     async def moi(self, interaction: discord.Interaction) -> None:
-        await send_memory(interaction, collective=False)
+        await open_memory(interaction, _app(self.bot), collective=False)
 
     @app_commands.command(name="global", description="Souvenirs du serveur")
     @app_commands.guild_only()
@@ -52,11 +54,11 @@ class PublicCommands(commands.Cog):
         if interaction.guild is None:
             await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
             return
-        await send_memory(interaction, collective=True)
+        await open_memory(interaction, _app(self.bot), collective=True)
 
     @app_commands.command(name="taches", description="Tes objectifs ouverts")
     async def tasks(self, interaction: discord.Interaction) -> None:
-        await send_tasks(interaction)
+        await open_tasks(interaction, _app(self.bot))
 
     @app_commands.command(name="info", description="Réglages de MARIA dans ce salon")
     @app_commands.guild_only()
@@ -66,8 +68,10 @@ class PublicCommands(commands.Cog):
             await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
             return
         guild, channel = place
-        text = await asyncio.to_thread(_snapshot, _app(self.bot), guild.id, channel.id)
-        await interaction.response.send_message(text[:2000], ephemeral=True)
+        app = _app(self.bot)
+        text, mode = await asyncio.to_thread(_snapshot, app, guild.id, channel.id)
+        view = card(f"#{channel.name}", text, meta=f"Mode · {mode}")
+        await interaction.response.send_message(view=view, ephemeral=True)
 
     chatbot = app_commands.Group(
         name="chatbot",
@@ -84,7 +88,7 @@ class PublicCommands(commands.Cog):
             await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
             return
         await asyncio.to_thread(save_mode, _app(self.bot).database, guild.id, mode.value, _stamp())
-        await interaction.response.send_message(f"Mode : **{mode.name}**.", ephemeral=True)
+        await answer(interaction, "Mode de réponse", mode.name)
 
     @chatbot.command(name="forget", description="Oublie la conversation de ce salon")
     async def forget(self, interaction: discord.Interaction) -> None:
@@ -93,7 +97,7 @@ class PublicCommands(commands.Cog):
             await interaction.response.send_message("Salon introuvable.", ephemeral=True)
             return
         _app(self.bot).conversation.forget_channel(channel.id)
-        await interaction.response.send_message("Conversation oubliée.", ephemeral=True)
+        await answer(interaction, "Conversation oubliée", "-# MARIA repart de zéro dans ce salon.")
 
     @chatbot.command(name="everyone", description="Répondre aux @everyone et @here")
     async def everyone(self, interaction: discord.Interaction, actif: bool) -> None:
@@ -111,7 +115,7 @@ class PublicCommands(commands.Cog):
             return
         await asyncio.to_thread(set_python, _app(self.bot).database, guild.id, actif, _stamp())
         state = "activé" if actif else "désactivé"
-        await interaction.response.send_message(f"run_python **{state}**.", ephemeral=True)
+        await answer(interaction, "run_python", f"**{state.capitalize()}** sur ce serveur.")
 
     @chatbot.command(name="spontaneite", description="Réactions spontanées de MARIA")
     @app_commands.choices(niveau=_LEVELS)
@@ -125,7 +129,7 @@ class PublicCommands(commands.Cog):
         await asyncio.to_thread(
             set_level, _app(self.bot).database, guild.id, niveau.value, _stamp()
         )
-        await interaction.response.send_message(f"Spontanéité : **{niveau.name}**.", ephemeral=True)
+        await answer(interaction, "Spontanéité", f"**{niveau.name}**")
 
     @chatbot.command(name="personnalite", description="Consigne de ton propre au serveur")
     @app_commands.describe(texte="Vide pour revenir à la personnalité par défaut")
@@ -137,10 +141,10 @@ class PublicCommands(commands.Cog):
         await asyncio.to_thread(
             save_personality, _app(self.bot).database, guild.id, texte.strip()[:1500], _stamp()
         )
-        done = (
-            "Personnalité du serveur enregistrée." if texte.strip() else "Personnalité par défaut."
-        )
-        await interaction.response.send_message(done, ephemeral=True)
+        if texte.strip():
+            await answer(interaction, "Personnalité du serveur", texte.strip()[:1500])
+        else:
+            await answer(interaction, "Personnalité", "Retour à la personnalité par défaut.")
 
     preferences = app_commands.Group(
         name="preferences", description="Tes réglages avec MARIA", guild_only=True
@@ -155,7 +159,7 @@ class PublicCommands(commands.Cog):
         app = _app(self.bot)
         await asyncio.to_thread(app.memory.set_prompts, interaction.user.id, guild.id, actif)
         state = "activées" if actif else "désactivées"
-        await interaction.response.send_message(f"Propositions **{state}**.", ephemeral=True)
+        await answer(interaction, "Propositions de souvenirs", f"**{state.capitalize()}**.")
 
     @preferences.command(name="reactions", description="Réactions spontanées sur tes messages")
     @app_commands.choices(niveau=[*_LEVELS, app_commands.Choice(name="Comme le serveur", value="")])
@@ -170,7 +174,7 @@ class PublicCommands(commands.Cog):
         await asyncio.to_thread(
             set_member_level, _app(self.bot).database, guild.id, interaction.user.id, chosen
         )
-        await interaction.response.send_message(f"Réactions : **{niveau.name}**.", ephemeral=True)
+        await answer(interaction, "Réactions sur tes messages", f"**{niveau.name}**")
 
 
 def _place(
@@ -203,21 +207,22 @@ async def _toggle(
     if everyone is not None:
         await asyncio.to_thread(save_everyone, database, channel.id, guild.id, everyone)
         state = "activée" if everyone else "désactivée"
-        await interaction.response.send_message(
-            f"Réponse aux @everyone / @here **{state}**.",
-            ephemeral=True,
-        )
+        await answer(interaction, "@everyone et @here", f"Réponse **{state}** dans ce salon.")
         return
     enabled = bool(transcribe)
     await asyncio.to_thread(save_transcribe, database, channel.id, guild.id, enabled)
     state = "activée" if enabled else "désactivée"
-    await interaction.response.send_message(
-        f"Transcription des vocaux **{state}**.",
-        ephemeral=True,
-    )
+    await answer(interaction, "Vocaux", f"Transcription automatique **{state}** dans ce salon.")
 
 
-def _snapshot(app: App, guild_id: int, channel_id: int) -> str:
+_MODES_TEXT = {
+    "off": "désactivée",
+    "strict": "mention, réponse ou prénom",
+    "greedy": "aussi quand on parle d'elle",
+}
+
+
+def _snapshot(app: App, guild_id: int, channel_id: int) -> tuple[str, str]:
     guild = app.database.fetchone(
         """
         SELECT mode, spontaneity, python_blocked, personality
@@ -234,21 +239,26 @@ def _snapshot(app: App, guild_id: int, channel_id: int) -> str:
     )
     mode = "strict" if guild is None else str(guild["mode"] or "strict")
     spontaneity = "normal" if guild is None else str(guild["spontaneity"] or "normal")
-    everyone = "oui" if channel is not None and channel["respond_everyone"] else "non"
-    transcribe = "oui" if channel is not None and channel["auto_transcribe"] else "non"
-    python = "non" if guild is not None and guild["python_blocked"] else "oui"
+    flags = [
+        ("@everyone", channel is not None and bool(channel["respond_everyone"])),
+        ("Vocaux transcrits", channel is not None and bool(channel["auto_transcribe"])),
+        ("run_python", guild is None or not guild["python_blocked"]),
+    ]
     personality = "propre au serveur" if guild is not None and guild["personality"] else "défaut"
-    history = app.conversation.transcript(channel_id)
-    return (
-        f"Mode : {mode}\n"
-        f"Spontanéité : {spontaneity}\n"
-        f"@everyone : {everyone}\n"
-        f"Vocaux transcrits : {transcribe}\n"
-        f"run_python : {python}\n"
-        f"Personnalité : {personality}\n"
-        f"Messages en mémoire dans ce salon : {len(history)}\n"
-        f"Outils : {', '.join(app.capabilities.names())}"
-    )
+    messages, tokens, ceiling = app.conversation.usage(channel_id)
+    share = min(100, round(100 * tokens / ceiling)) if ceiling else 0
+    filled = share // 5
+    lines = [
+        f"**Messages** · {messages}",
+        f"**Tokens** · {tokens:,} / {ceiling:,}".replace(",", " "),
+        f"`{'█' * filled}{'░' * (20 - filled)}` {share} %",
+        "",
+        f"**Spontanéité** · {spontaneity}",
+        f"**Personnalité** · {personality}",
+        " · ".join(f"{label} {'✅' if on else '❌'}" for label, on in flags),
+        f"-# {len(app.capabilities.names())} outils disponibles",
+    ]
+    return "\n".join(lines), _MODES_TEXT.get(mode, mode)
 
 
 def _stamp() -> str:
