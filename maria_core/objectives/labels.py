@@ -32,12 +32,10 @@ def kind_label(
         return "Alerte vocale"
     if kind == "on_member_join":
         return "Alerte d'arrivée"
-    if act == "report":
-        return "Récap"
     if kind == "at":
         return "Rappel"
     if kind in _RECURRING:
-        return "Rappel récurrent" if act in {"remind", ""} else "Tâche programmée"
+        return "Rappel récurrent" if act in {"remind", "report", ""} else "Tâche programmée"
     return "Tâche"
 
 

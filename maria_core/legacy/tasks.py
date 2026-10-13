@@ -263,10 +263,11 @@ def _prompt(
 def _reminder(
     row: sqlite3.Row, text: str | None = None
 ) -> tuple[dict[str, object], dict[str, object] | None] | Skip:
+    """MARIA_R faisait toujours exécuter la consigne par le modèle : c'est un « report »."""
     body = _text(row) if text is None else text.strip()
     if not body:
         return skip_task(row, "rappel sans texte")
-    return {"type": "remind", "text": body}, None
+    return {"type": "report", "text": body}, None
 
 
 def _condition(row: sqlite3.Row, raw: object) -> dict[str, object] | Skip | None:
