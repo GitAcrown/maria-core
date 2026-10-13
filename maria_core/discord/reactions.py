@@ -11,11 +11,12 @@ from discord.ext import commands
 from maria_core.app import App
 from maria_core.conversation.model import ReplyMode
 from maria_core.social.service import ReactionSeen
+from maria_core.ui.emojis import FALLBACKS, TRANSCRIPT
 
 logger = logging.getLogger(__name__)
 
 _CUSTOM = re.compile(r"<a?:\w+:(\d+)>")
-_IGNORED = frozenset({"🎙️"})
+_IGNORED = frozenset({TRANSCRIPT, FALLBACKS[TRANSCRIPT]})
 
 
 class ReactionCog(commands.Cog):
@@ -36,9 +37,11 @@ class ReactionCog(commands.Cog):
 
     def usable(self, emoji: str) -> bool:
         """Un emoji custom n'est posable que si MARIA le voit (serveur commun)."""
+        if emoji in _IGNORED:
+            return False
         match = _CUSTOM.fullmatch(emoji)
         if match is None:
-            return emoji not in _IGNORED
+            return True
         found = self.bot.get_emoji(int(match.group(1)))
         return found is not None and found.is_usable()
 

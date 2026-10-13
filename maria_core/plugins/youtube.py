@@ -10,11 +10,13 @@ from urllib.parse import parse_qs, urlparse
 from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.capabilities.http import HttpClient, HttpError, parse_json, with_query
 from maria_core.plugins import PluginHost
-from maria_core.ui.widgets import Rendered, card, heading, links, thumbnail
+from maria_core.ui.emojis import YOUTUBE
+from maria_core.ui.widgets import Rendered, card, thumbnail
 
 _OEMBED = "https://www.youtube.com/oembed"
 _LANGS = ("fr", "fr-FR", "en", "en-US")
 _ID = re.compile(r"^[\w-]{11}$")
+_TRANSCRIPT = 8000
 
 
 NAME = "youtube"
@@ -58,13 +60,27 @@ def render_youtube(data: Mapping[str, Any]) -> Rendered:
     if not video:
         return Rendered()
     url = f"https://www.youtube.com/watch?v={video}"
-    built = card(
-        heading(f"▶️ {title}", str(data.get("author") or "")),
-        thumbnail("Sous-titres lus.", f"https://i.ytimg.com/vi/{video}/hqdefault.jpg"),
-        links([("Voir sur YouTube", url)]),
-        accent=0xFF0000,
-    )
+    lines = [f"## {YOUTUBE} {title}"]
+    if data.get("author"):
+        lines.append(f"**{data['author']}**")
+    meta: list[str] = []
+    seconds = data.get("seconds")
+    if isinstance(seconds, int) and seconds > 0:
+        meta.append(_clock(seconds))
+    captions = "Sous-titres auto" if data.get("generated") else "Sous-titres"
+    meta.append(f"{captions} · {data['language']}" if data.get("language") else captions)
+    if data.get("truncated"):
+        meta.append("transcription tronquée")
+    meta.append(f"[YouTube](<{url}>)")
+    lines.append(f"-# {' · '.join(meta)}")
+    built = card(thumbnail("\n".join(lines), f"https://i.ytimg.com/vi/{video}/hqdefault.jpg"))
     return Rendered(cards=(built,), note=f"Vidéo lue : {title} — {data.get('author', '')}")
+
+
+def _clock(seconds: int) -> str:
+    hours, rest = divmod(max(0, seconds), 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
 def video_id(raw: str) -> str | None:
@@ -92,18 +108,23 @@ async def _load(http: HttpClient, video: str) -> dict[str, str]:
     if page.status != 200:
         raise ValueError("Vidéo inaccessible.")
     html = page.body.decode("utf-8", errors="replace")
-    url = _caption_url(_array_after(html, '"captionTracks":'))
+    url, language, generated = _caption_url(_array_after(html, '"captionTracks":'))
     if not url:
         raise ValueError("Aucun sous-titre disponible.")
     track = await http.request("GET", url, timeout=15, max_bytes=1_000_000)
     transcript = _transcript(track.body.decode("utf-8", errors="replace"))
     if not transcript:
         raise ValueError("Sous-titres vides.")
+    length = re.search(r'"lengthSeconds":"(\d+)"', html)
     return {
         "video_id": video,
         "title": meta.get("title", ""),
         "author": meta.get("author_name", ""),
-        "transcript": transcript[:8000],
+        "language": language,
+        "generated": generated,
+        "seconds": int(length.group(1)) if length else 0,
+        "truncated": len(transcript) > _TRANSCRIPT,
+        "transcript": transcript[:_TRANSCRIPT],
     }
 
 
@@ -153,15 +174,18 @@ def _loads(raw: str) -> list[Any]:
     return loaded if isinstance(loaded, list) else []
 
 
-def _caption_url(tracks: list[Any]) -> str:
-    found: dict[str, str] = {}
+def _caption_url(tracks: list[Any]) -> tuple[str, str, bool]:
+    """(URL, langue, générée automatiquement). En français si possible."""
+    found: dict[str, tuple[str, bool]] = {}
     for track in tracks:
         if isinstance(track, dict) and str(track.get("baseUrl") or "").startswith("http"):
-            found.setdefault(str(track.get("languageCode") or ""), str(track["baseUrl"]))
-    for code in _LANGS:
+            code = str(track.get("languageCode") or "")
+            found.setdefault(code, (str(track["baseUrl"]), track.get("kind") == "asr"))
+    for code in (*_LANGS, *found):
         if code in found:
-            return found[code]
-    return next(iter(found.values()), "")
+            url, generated = found[code]
+            return url, code, generated
+    return "", "", False
 
 
 def _transcript(xml: str) -> str:

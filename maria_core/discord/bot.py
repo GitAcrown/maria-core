@@ -14,6 +14,7 @@ from maria_core.discord.commands.owner import OwnerCommands
 from maria_core.discord.commands.public import PublicCommands
 from maria_core.discord.commands.social import SocialCommands
 from maria_core.discord.directory import DiscordDirectory
+from maria_core.discord.layout import use_emojis
 from maria_core.discord.memory_view import restore_proposals
 from maria_core.discord.objectives import DiscordCourier, restore_drafts
 from maria_core.discord.polls import DiscordPolls
@@ -22,6 +23,7 @@ from maria_core.discord.reactions import ReactionCog
 from maria_core.discord.reading import DiscordHistory
 from maria_core.discord.signals import SignalCog
 from maria_core.discord.voice import VoiceCog
+from maria_core.ui.emojis import FALLBACKS, emoji_id
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +111,19 @@ class MariaBot(commands.Bot):
             discord.__version__,
             len(self.guilds),
         )
+        await self._check_emojis()
+
+    async def _check_emojis(self) -> None:
+        """Emojis du serveur et de l'application : les emojis custom absents passent en Unicode."""
+        usable = {emoji.id for emoji in self.emojis}
+        try:
+            usable |= {emoji.id for emoji in await self.fetch_application_emojis()}
+        except discord.HTTPException:
+            logger.debug("Emojis d'application illisibles", exc_info=True)
+        use_emojis(usable)
+        missing = [tag for tag in FALLBACKS if emoji_id(tag) not in usable]
+        if missing:
+            logger.warning("Emojis custom inaccessibles, repli Unicode : %s", ", ".join(missing))
 
     async def on_command_error(
         self,

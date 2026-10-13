@@ -1,4 +1,4 @@
-"""Films et séries via TMDB : fiche du meilleur résultat, avec affiche, genres et durée."""
+"""Films et séries via TMDB : la fiche du meilleur résultat, mise en page comme dans MARIA_R."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -6,11 +6,14 @@ from typing import Any
 from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.capabilities.http import HttpClient, HttpError, parse_json, with_query
 from maria_core.plugins import PluginHost
-from maria_core.ui.widgets import Rendered, card, footer, heading, links, stats, thumbnail
+from maria_core.ui.emojis import MOVIE, TV
+from maria_core.ui.widgets import Rendered, card, footer, separator, text, thumbnail
 
 _BASE = "https://api.themoviedb.org/3"
 _POSTER = "https://image.tmdb.org/t/p/w500{}"
-_ACCENT = 0x01B4E4
+_TYPE_EMOJI = {"movie": MOVIE, "tv": TV}
+_TYPE_LABEL = {"movie": "Film", "tv": "Série"}
+_OVERVIEW = 380
 
 NAME = "tmdb"
 
@@ -53,25 +56,44 @@ def media_capability(http: HttpClient, api_key: str) -> Capability:
 
 
 def render_media(data: Mapping[str, Any]) -> Rendered:
+    kind = str(data.get("media_type") or "movie")
     year = str(data.get("date") or "")[:4]
-    title = f"{data.get('title')} ({year})" if year else str(data.get("title"))
-    meta = " · ".join(
-        part for part in (data.get("kind"), ", ".join(data.get("genres") or [])) if part
-    )
-    pairs = [("Note", f"{data.get('vote')}/10"), ("Durée", str(data.get("length") or ""))]
-    overview = str(data.get("overview") or "Pas de synopsis.")[:900]
+    title = f"## {_TYPE_EMOJI.get(kind, MOVIE)} {data.get('title')}"
+    if year:
+        title += f"  ·  {year}"
+    meta = "  ·  ".join([_TYPE_LABEL.get(kind, "Média"), *(data.get("genres") or [])[:3]])
+    overview = str(data.get("overview") or "").strip()
+    if len(overview) > _OVERVIEW:
+        overview = overview[:_OVERVIEW] + "…"
+    rating = _rating(data)
+    body = f"{rating}\n{overview}" if rating else overview
+    body = body.strip() or "-# Aucune description disponible."
     built = card(
-        heading(f"🎬 {title}", meta),
-        stats(pairs),
-        thumbnail(overview, str(data.get("poster") or "")),
-        links([("TMDB", str(data.get("url") or ""))]),
-        footer("Voir aussi : " + ", ".join(data.get("others") or []))
-        if data.get("others")
-        else None,
-        accent=_ACCENT,
+        text(f"{title}\n-# {meta}"),
+        separator(wide=True),
+        thumbnail(body, str(data.get("poster") or "")),
+        footer(_footer(data)),
     )
-    note = f"{title} : {data.get('vote')}/10, {meta}. {overview[:200]}"
+    note = f"{data.get('title')} ({year}) : {data.get('vote')}/10, {meta}. {overview[:200]}"
     return Rendered(cards=(built,), note=note)
+
+
+def _rating(data: Mapping[str, Any]) -> str:
+    vote = float(data.get("vote") or 0)
+    count = int(data.get("votes") or 0)
+    if vote and count:
+        full = round(vote / 2)
+        return f"{'★' * full}{'☆' * (5 - full)}  **{vote:.1f}/10**  ·  {count:,} votes"
+    return f"**{vote:.1f}/10**" if vote else ""
+
+
+def _footer(data: Mapping[str, Any]) -> str:
+    parts = [str(part) for part in (data.get("length"), data.get("language")) if part]
+    if data.get("url"):
+        parts.append(f"[TMDB](<{data['url']}>)")
+    if data.get("others"):
+        parts.append("aussi : " + ", ".join(data["others"]))
+    return " · ".join(parts) or "TMDB"
 
 
 async def _search(http: HttpClient, api_key: str, query: str) -> list[dict[str, Any]]:
@@ -86,17 +108,20 @@ async def _search(http: HttpClient, api_key: str, query: str) -> list[dict[str, 
 
 
 async def _details(http: HttpClient, api_key: str, hit: dict[str, Any]) -> dict[str, Any]:
-    kind = "movie" if hit["media_type"] == "movie" else "tv"
+    kind = hit["media_type"]
     payload = await _json(
         http, f"{_BASE}/{kind}/{hit['id']}", {"api_key": api_key, "language": "fr-FR"}
     )
     genres = [
         str(item.get("name")) for item in payload.get("genres") or [] if isinstance(item, dict)
     ]
+    language = str(payload.get("original_language") or "")
     return {
         **hit,
         "genres": genres[:3],
         "length": _length(payload),
+        "language": language.upper() if language and language != "fr" else "",
+        "votes": int(payload.get("vote_count") or hit["votes"] or 0),
         "overview": str(payload.get("overview") or hit["overview"])[:900],
         "url": f"https://www.themoviedb.org/{kind}/{hit['id']}",
     }
@@ -121,9 +146,9 @@ def _hit(item: Mapping[str, Any]) -> dict[str, Any]:
         "id": int(item["id"]),
         "media_type": kind,
         "title": title,
-        "kind": "Film" if kind == "movie" else "Série",
         "date": str(item.get("release_date") or item.get("first_air_date") or ""),
         "vote": round(float(item.get("vote_average") or 0), 1),
+        "votes": int(item.get("vote_count") or 0),
         "overview": str(item.get("overview") or "")[:400],
         "poster": _POSTER.format(poster) if poster else "",
     }
@@ -133,7 +158,7 @@ def _length(payload: Mapping[str, Any]) -> str:
     runtime = payload.get("runtime")
     if isinstance(runtime, int) and runtime > 0:
         hours, minutes = divmod(runtime, 60)
-        return f"{hours} h {minutes:02d}" if hours else f"{minutes} min"
+        return f"{hours}h{minutes:02d}" if hours else f"{minutes} min"
     seasons = payload.get("number_of_seasons")
     if isinstance(seasons, int) and seasons > 0:
         return f"{seasons} saison{'s' if seasons > 1 else ''}"

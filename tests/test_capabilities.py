@@ -282,7 +282,8 @@ async def test_football_falls_back_to_thesportsdb_without_a_key() -> None:
     capability = football_capability(FakeHttp(handler))
     result = await capability.run(_context(), {"team": "PSG"})
     assert result.ok is True
-    assert result.data["matches"][0]["away"] == "OM"
+    assert result.data["match"]["away"] == "OM"
+    assert result.data["match"]["source"] == "TheSportsDB"
 
 
 def test_youtube_ids_and_missing_captions() -> None:
@@ -394,7 +395,7 @@ async def test_the_other_media_tools_parse_their_payloads(tmp_path: Path) -> Non
     settings = replace(Settings.for_tests(tmp_path), prim_api_key="prim")
     bus = await transport_capability(http, settings).run(_context(), {"stop": "République"})
     assert media.data["title"] == "Dune"
-    assert media.data["length"] == "2 h 35"
+    assert media.data["length"] == "2h35"
     assert game.data["price"] == "10€"
     assert track.data["tracks"][0]["artists"] == "Frank"
     assert bus.data["rows"][0]["code"] == "11"

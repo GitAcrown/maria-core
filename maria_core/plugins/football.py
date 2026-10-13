@@ -165,7 +165,12 @@ class _Sources:
         matches = [item for item in rows if isinstance(item, dict)]
         if not matches:
             raise ValueError(f"Aucun match trouvé pour {found.get('strTeam') or team}.")
-        return {"mode": "tsdb", "title": str(found.get("strTeam") or team), "matches": matches[:5]}
+        return {
+            "mode": "tsdb",
+            "title": str(found.get("strTeam") or team),
+            "matches": matches[:5],
+            "single": when != "recent",
+        }
 
     async def _tsdb(self, script: str, params: dict[str, str]) -> dict[str, Any]:
         payload = parse_json(

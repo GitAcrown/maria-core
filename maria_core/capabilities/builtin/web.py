@@ -31,12 +31,12 @@ def web_capabilities(
 
 
 def render_images(data: Mapping[str, Any]) -> Rendered:
-    urls = [
-        str(item.get("url") or "") for item in data.get("images") or [] if isinstance(item, dict)
-    ]
-    return Rendered(
-        cards=(card(gallery(urls)),), note=f"Images affichées : {data.get('query', '')}"
-    )
+    """Une galerie seule, sans conteneur, comme dans MARIA_R."""
+    images = [item for item in data.get("images") or [] if isinstance(item, dict)]
+    urls = [str(item.get("url") or "") for item in images]
+    captions = {str(item.get("url") or ""): str(item.get("title") or "") for item in images}
+    built = card(gallery(urls, captions), bare=True)
+    return Rendered(cards=(built,), note=f"Images affichées : {data.get('query', '')}")
 
 
 async def brave_search(

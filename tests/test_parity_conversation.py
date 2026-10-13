@@ -88,7 +88,12 @@ def test_a_thread_reads_the_settings_of_its_parent(tmp_path: Path) -> None:
 
 
 def test_history_tags_context_gaps_and_keeps_images_only_when_addressed() -> None:
-    history = ChannelHistory(max_messages=20, max_tokens=5000, max_age=timedelta(days=1))
+    history = ChannelHistory(
+        max_messages=20,
+        max_tokens=5000,
+        max_age=timedelta(days=1),
+        clock=lambda: _NOW + timedelta(hours=1),
+    )
     pictured = _message(images=(), text="regarde")
     history.add(user_entry(pictured, addressed=False))
     later = _message(message_id=11, created_at=_NOW + timedelta(minutes=45), text="Maria ?")

@@ -8,7 +8,8 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from maria_core.ui.widgets import Rendered, card, footer, heading, text
+from maria_core.ui.emojis import TRAIN
+from maria_core.ui.widgets import Card, Rendered, card, footer, separator, text
 
 PARIS = ZoneInfo("Europe/Paris")
 _MODE_RANK = {
@@ -24,7 +25,6 @@ _MODE_RANK = {
 _SKIP_CHANNELS = {"pids", "cbiv"}
 _TITLE_CHANNELS = {"title", "titre", "notification"}
 _NOTE_LIMIT = 900
-_ACCENT = 0x6E1E78
 
 
 def parse_time(raw: str) -> datetime | None:
@@ -101,30 +101,46 @@ def disruption_copy(messages: list[Any]) -> str:
 
 def render_transport(data: Mapping[str, Any]) -> Rendered:
     if data.get("kind") == "departures":
-        rows = [item for item in data.get("rows") or [] if isinstance(item, dict)]
-        lines = [
-            f"**{row['code']}** {row.get('mode', '')} → {row['direction']} · "
-            f"{', '.join(row['waits'])}"
-            for row in rows
-        ]
-        live = "temps réel" if data.get("realtime") else "horaires théoriques"
-        built = card(
-            heading(f"🚉 {data.get('stop')}", live),
-            text("\n".join(lines) or "Aucun passage proche."),
-            footer(str(data.get("source") or "")),
-            accent=_ACCENT,
-        )
-        return Rendered(
-            cards=(built,), note=f"Passages à {data.get('stop')} : " + " ; ".join(lines[:5])
-        )
+        return Rendered(cards=(_departures(data),), note=_departures_note(data))
     notes = [str(item) for item in data.get("notes") or []]
-    built = card(
-        heading(f"🚦 {data.get('title')}", str(data.get("status") or "")),
-        text("\n\n".join(notes)) if notes else None,
-        footer(str(data.get("source") or "")),
-        accent=_ACCENT,
-    )
+    blocks = [text(f"## {TRAIN} {data.get('title') or 'Trafic'}")]
+    if data.get("status"):
+        blocks.append(text(str(data["status"])))
+    blocks.append(separator(wide=True))
+    for index, note in enumerate(notes or ["Trafic normal."]):
+        if index:
+            blocks.append(separator())
+        blocks.append(text(note))
+    blocks.append(footer(str(data.get("source") or "IDFM")))
     summary = f"{data.get('title')} : {data.get('status')}. " + " | ".join(
         n[:160] for n in notes[:3]
     )
-    return Rendered(cards=(built,), note=summary)
+    return Rendered(cards=(card(*blocks),), note=summary)
+
+
+def _departures(data: Mapping[str, Any]) -> Card:
+    lines = []
+    for row in data.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        head = f"**{row.get('code') or '?'}**"
+        mode = str(row.get("mode") or "")
+        if mode and mode.lower() not in str(row.get("code") or "").lower():
+            head = f"{head} · {mode}"
+        line = f"{head}  {row['direction']}" if row.get("direction") else head
+        if row.get("waits"):
+            line = f"{line}  ·  {' · '.join(row['waits'])}"
+        lines.append(line)
+    stamp = "temps réel" if data.get("realtime") else "horaire"
+    return card(
+        text(f"## {TRAIN} {data.get('stop') or 'Arrêt'}\n-# Prochains passages"),
+        separator(wide=True),
+        text("\n".join(lines) if lines else "-# Aucun passage proche."),
+        footer(f"{stamp} · {data.get('source') or 'IDFM'}"),
+    )
+
+
+def _departures_note(data: Mapping[str, Any]) -> str:
+    rows = [row for row in data.get("rows") or [] if isinstance(row, dict)]
+    bits = [f"{row['code']} {row['direction']} ({', '.join(row['waits'])})" for row in rows[:5]]
+    return f"Prochains passages à {data.get('stop')} : " + "; ".join(bits)
