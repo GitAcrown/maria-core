@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from maria_core.db import Database
 from maria_core.objectives.compile import PRICE_CONDITIONS
+from maria_core.objectives.labels import kind_label
 from maria_core.objectives.model import Objective
 from maria_core.objectives.price import Candidate, ambiguous, candidates, price_holds
 from maria_core.objectives.quota import budget_key, take_fetch
@@ -261,12 +262,13 @@ def _footer(objective: Objective, current: Pass, signal: ObjectiveSignal | None)
         limit_text = (
             f" · seuil {float(threshold):g} €" if isinstance(threshold, int | float) else ""
         )
-        return f"**Veille** · {current.price:.2f} €{limit_text}"
+        return f"**Veille de prix** · {current.price:.2f} €{limit_text}"
     if objective.action.get("type") == "fetch_then":
-        return "**Veille** · " + describe(objective.trigger)
+        return "**Surveillance** · " + describe(objective.trigger)
+    kind = kind_label(objective.trigger, objective.action, objective.condition)
     if objective.trigger.get("type") == "at":
-        return "**Rappel**"
-    return "**Programmé** · " + describe(objective.trigger)
+        return f"**{kind}**"
+    return f"**{kind}** · " + describe(objective.trigger)
 
 
 def _before(condition: Mapping[str, Any] | None) -> bool:

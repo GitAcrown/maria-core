@@ -39,7 +39,8 @@ def weather_capability(http: HttpClient, api_key: str) -> Capability:
         description=(
             "Météo d'une ville. type=current pour maintenant, type=forecast pour les jours. "
             "target_date : demain, un jour (lundi), ou YYYY-MM-DD ; vide : la semaine. "
-            "Ville absente : celle du PROFIL de la personne."
+            "Ville absente (« chez moi », « ma ville ») : celle du PROFIL ; sinon search_memory "
+            "avant de demander."
         ),
         parameters={
             "type": "object",

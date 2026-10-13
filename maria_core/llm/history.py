@@ -149,6 +149,10 @@ class ChannelHistory:
         while len(self._items) > 1 and self._over_budget():
             self._remember(self._items.pop(0))
 
+    def usage(self) -> tuple[int, int, int]:
+        """Messages gardés, tokens estimés, plafond de tokens."""
+        return len(self._items), self._tokens(), self._max_tokens
+
     def _over_budget(self) -> bool:
         if len(self._items) > self._max_messages:
             return True

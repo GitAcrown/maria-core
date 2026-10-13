@@ -39,8 +39,6 @@ _LABELS = {
     "read_web_page": ("Lecture", "url"),
     "remember_fact": ("Retenu", "content"),
     "forget_fact": ("Oublié", ""),
-    "objective_create": ("Objectif", "title"),
-    "objective_update": ("Objectif", "op"),
 }
 _NOTE_CHARS = 360
 
@@ -115,6 +113,8 @@ def _label(record: ToolRecord) -> str:
         return ""
     if record.name in {"search_web", "read_web_page"} and _sources((record,)):
         return ""
+    if record.name in {"objective_create", "objective_update"}:
+        return _objective_label(record)
     title, field = _LABELS.get(record.name, ("", ""))
     if not title:
         words = [word.capitalize() for word in record.name.split("_") if word]
@@ -123,6 +123,19 @@ def _label(record: ToolRecord) -> str:
     if field == "url":
         return f"**{title}** · {_domain(str(record.arguments.get(field) or ''))}"
     return f"**{title}** · « {detail} »" if detail else f"**{title}**"
+
+
+def _objective_label(record: ToolRecord) -> str:
+    """Rappel, Écoute, Surveillance… plutôt qu'un « Objectif » générique."""
+    data = record.result.data
+    kind = str(data.get("kind") or "Objectif")
+    if record.name == "objective_update":
+        done = str(data.get("done") or "")
+        return f"**{kind}** · {done}" if done else f"**{kind}**"
+    title = _clip(str(data.get("title") or record.arguments.get("title") or ""))
+    when = str(data.get("when") or "")
+    tail = f" · {when}" if when and data.get("status") != "draft" else ""
+    return f"**{kind}** · « {title} »{tail}" if title else f"**{kind}**"
 
 
 def _sources(records: tuple[ToolRecord, ...]) -> list[str]:

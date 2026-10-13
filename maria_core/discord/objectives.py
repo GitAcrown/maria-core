@@ -1,6 +1,5 @@
 """Envoie un objectif : ping du propriétaire, réponse à la demande d'origine, pied discret."""
 
-import asyncio
 import logging
 import re
 
@@ -9,10 +8,8 @@ from discord.ext import commands
 
 from maria_core.app import App
 from maria_core.discord.layout import build_views, quiet_links
-from maria_core.objectives.model import Objective, StaleObjective
+from maria_core.objectives.model import Objective
 from maria_core.objectives.pipeline import Delivery
-from maria_core.objectives.schedule import describe
-from maria_core.objectives.tools import apply
 from maria_core.ui.render import split_message
 
 logger = logging.getLogger(__name__)
@@ -67,62 +64,6 @@ class DiscordCourier:
         return self._bot.get_user(objective.owner_id) or await self._bot.fetch_user(
             objective.owner_id
         )
-
-
-class ConfirmView(discord.ui.View):
-    """Confirmer / Annuler sous un brouillon. Persistant : survit au redémarrage."""
-
-    def __init__(self, objective_id: int) -> None:
-        super().__init__(timeout=None)
-        self.objective_id = objective_id
-        confirm = discord.ui.Button(
-            label="Confirmer",
-            style=discord.ButtonStyle.success,
-            custom_id=f"maria:obj:{objective_id}:yes",
-        )
-        cancel = discord.ui.Button(
-            label="Annuler",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"maria:obj:{objective_id}:no",
-        )
-        confirm.callback = self._confirm
-        cancel.callback = self._cancel
-        self.add_item(confirm)
-        self.add_item(cancel)
-
-    async def _confirm(self, interaction: discord.Interaction) -> None:
-        await _settle(interaction, self.objective_id, "confirm")
-
-    async def _cancel(self, interaction: discord.Interaction) -> None:
-        await _settle(interaction, self.objective_id, "cancel")
-
-
-def restore_drafts(bot: commands.Bot, app: App) -> None:
-    for objective in app.objectives.store.recent_drafts():
-        if objective.origin_message_id is not None:
-            bot.add_view(ConfirmView(objective.id))
-
-
-async def _settle(interaction: discord.Interaction, objective_id: int, op: str) -> None:
-    app = getattr(interaction.client, "app", None)
-    if not isinstance(app, App):
-        return
-    objective = await asyncio.to_thread(app.objectives.store.get, objective_id)
-    if objective is None or objective.owner_id != interaction.user.id:
-        await interaction.response.send_message("Ce brouillon n'est pas le tien.", ephemeral=True)
-        return
-    try:
-        saved = await asyncio.to_thread(apply, app.objectives, objective, {"op": op})
-    except (StaleObjective, ValueError):
-        await interaction.response.send_message("Ce brouillon est déjà traité.", ephemeral=True)
-        return
-    text = (
-        f"Objectif activé : {saved.title} ({describe(saved.trigger)})."
-        if op == "confirm"
-        else "Brouillon annulé."
-    )
-    await interaction.response.edit_message(view=None)
-    await interaction.followup.send(text, ephemeral=True)
 
 
 async def _origin(

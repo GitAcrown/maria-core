@@ -3,6 +3,12 @@
 import re
 
 _TOKEN = re.compile(r"\w+", re.UNICODE)
+_IDENTITY = re.compile(
+    r"\b(habite|habitant|ville|adresse|vit (?:à|a|en|au)|demeure|anniv\w*|naissance|née?|"
+    r"âge|ans|prénom|s'appelle|travaille|boulot|métier|études?|étudie|coloc|en couple|"
+    r"copine|copain|conjoint|gaucher|droitier)\b",
+    re.IGNORECASE,
+)
 _EXPLICIT = re.compile(
     "\\b(?:retiens(?:\\s+que)?|souviens-toi(?:\\s+que)?|n['\u2019]oublie pas que|remember that)\\b",
     re.IGNORECASE,
@@ -165,3 +171,8 @@ def match_query(text: str) -> str:
     if not words:
         return ""
     return " OR ".join(f'"{word}"' for word in words)
+
+
+def identity_fact(content: str) -> bool:
+    """Ville, âge, métier, couple… : ce qui doit rester dans le profil, comme dans MARIA_R."""
+    return bool(_IDENTITY.search(content or ""))
