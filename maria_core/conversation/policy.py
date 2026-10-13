@@ -10,7 +10,7 @@ def load_policy(database: Database, message: Inbound) -> Policy:
     if message.guild_id is None:
         return Policy(mode=ReplyMode.STRICT)
     guild = database.fetchone(
-        "SELECT mode, personality FROM guild_settings WHERE guild_id = ?",
+        "SELECT mode FROM guild_settings WHERE guild_id = ?",
         (message.guild_id,),
     )
     channel = database.fetchone(
@@ -22,7 +22,6 @@ def load_policy(database: Database, message: Inbound) -> Policy:
     )
     return Policy(
         mode=_mode(guild),
-        personality=_text(guild, "personality"),
         respond_everyone=_flag(channel, "respond_everyone"),
         auto_transcribe=_flag(channel, "auto_transcribe"),
     )
@@ -41,19 +40,6 @@ def save_mode(database: Database, guild_id: int, mode: str, now: str) -> str:
         (guild_id, chosen.value, now),
     )
     return chosen.value
-
-
-def save_personality(database: Database, guild_id: int, text: str, now: str) -> None:
-    database.execute(
-        """
-        INSERT INTO guild_settings (guild_id, personality, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(guild_id) DO UPDATE SET
-            personality = excluded.personality,
-            updated_at = excluded.updated_at
-        """,
-        (guild_id, text, now),
-    )
 
 
 def save_everyone(database: Database, channel_id: int, guild_id: int, enabled: bool) -> None:
@@ -90,12 +76,6 @@ def _mode(row: sqlite3.Row | None) -> ReplyMode:
         return ReplyMode(str(row["mode"]))
     except ValueError:
         return ReplyMode.STRICT
-
-
-def _text(row: sqlite3.Row | None, column: str) -> str:
-    if row is None:
-        return ""
-    return str(row[column] or "")
 
 
 def _flag(row: sqlite3.Row | None, column: str) -> bool:

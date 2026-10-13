@@ -166,3 +166,19 @@ def _filled(block: Block) -> bool:
 
 def _is_url(url: str) -> bool:
     return isinstance(url, str) and url.startswith(("https://", "http://"))
+
+
+def quote(content: str) -> str:
+    """Résumé en citation italique, comme les fiches de CRIT."""
+    lines = [line.strip() for line in content.strip().splitlines()]
+    return "\n".join(f"> *{line}*" if line else ">" for line in lines)
+
+
+def joined(*parts: object) -> str:
+    """Méta et pieds : éléments non vides séparés par un point médian aéré."""
+    return "  ·  ".join(str(part) for part in parts if part)
+
+
+def grouped(value: int) -> str:
+    """1234567 -> « 1 234 567 » (espace fine insécable)."""
+    return f"{value:,}".replace(",", "\u202f")

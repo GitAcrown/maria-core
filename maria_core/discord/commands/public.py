@@ -12,10 +12,9 @@ from maria_core.capabilities.builtin.python_tool import set_python
 from maria_core.conversation.policy import (
     save_everyone,
     save_mode,
-    save_personality,
     save_transcribe,
 )
-from maria_core.discord.hub import answer, card
+from maria_core.discord.hub import answer, card, refuse
 from maria_core.discord.memory_menu import open_memory
 from maria_core.discord.task_menu import open_tasks
 from maria_core.social.levels import LEVELS, set_level, set_member_level
@@ -52,11 +51,11 @@ class PublicCommands(commands.Cog):
     @app_commands.guild_only()
     async def guild_memory(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
-            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            await refuse(interaction, "Disponible sur un serveur.")
             return
         await open_memory(interaction, _app(self.bot), collective=True)
 
-    @app_commands.command(name="taches", description="Tes objectifs ouverts")
+    @app_commands.command(name="programmes", description="Tes rappels, écoutes et surveillances")
     async def tasks(self, interaction: discord.Interaction) -> None:
         await open_tasks(interaction, _app(self.bot))
 
@@ -65,7 +64,7 @@ class PublicCommands(commands.Cog):
     async def info(self, interaction: discord.Interaction) -> None:
         place = _place(interaction)
         if place is None:
-            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            await refuse(interaction, "Disponible sur un serveur.")
             return
         guild, channel = place
         app = _app(self.bot)
@@ -85,7 +84,7 @@ class PublicCommands(commands.Cog):
     async def mode(self, interaction: discord.Interaction, mode: app_commands.Choice[str]) -> None:
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            await refuse(interaction, "Disponible sur un serveur.")
             return
         await asyncio.to_thread(save_mode, _app(self.bot).database, guild.id, mode.value, _stamp())
         await answer(interaction, "Mode de réponse", mode.name)
@@ -94,7 +93,7 @@ class PublicCommands(commands.Cog):
     async def forget(self, interaction: discord.Interaction) -> None:
         channel = interaction.channel
         if channel is None:
-            await interaction.response.send_message("Salon introuvable.", ephemeral=True)
+            await refuse(interaction, "Salon introuvable.")
             return
         _app(self.bot).conversation.forget_channel(channel.id)
         await answer(interaction, "Conversation oubliée", "-# MARIA repart de zéro dans ce salon.")
@@ -111,7 +110,7 @@ class PublicCommands(commands.Cog):
     async def python(self, interaction: discord.Interaction, actif: bool) -> None:
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            await refuse(interaction, "Disponible sur un serveur.")
             return
         await asyncio.to_thread(set_python, _app(self.bot).database, guild.id, actif, _stamp())
         state = "activé" if actif else "désactivé"
@@ -124,27 +123,12 @@ class PublicCommands(commands.Cog):
     ) -> None:
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            await refuse(interaction, "Disponible sur un serveur.")
             return
         await asyncio.to_thread(
             set_level, _app(self.bot).database, guild.id, niveau.value, _stamp()
         )
         await answer(interaction, "Spontanéité", f"**{niveau.name}**")
-
-    @chatbot.command(name="personnalite", description="Consigne de ton propre au serveur")
-    @app_commands.describe(texte="Vide pour revenir à la personnalité par défaut")
-    async def personality(self, interaction: discord.Interaction, texte: str = "") -> None:
-        guild = interaction.guild
-        if guild is None:
-            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
-            return
-        await asyncio.to_thread(
-            save_personality, _app(self.bot).database, guild.id, texte.strip()[:1500], _stamp()
-        )
-        if texte.strip():
-            await answer(interaction, "Personnalité du serveur", texte.strip()[:1500])
-        else:
-            await answer(interaction, "Personnalité", "Retour à la personnalité par défaut.")
 
     preferences = app_commands.Group(
         name="preferences", description="Tes réglages avec MARIA", guild_only=True
@@ -154,7 +138,7 @@ class PublicCommands(commands.Cog):
     async def proposals(self, interaction: discord.Interaction, actif: bool) -> None:
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            await refuse(interaction, "Disponible sur un serveur.")
             return
         app = _app(self.bot)
         await asyncio.to_thread(app.memory.set_prompts, interaction.user.id, guild.id, actif)
@@ -168,7 +152,7 @@ class PublicCommands(commands.Cog):
     ) -> None:
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("Disponible sur un serveur.", ephemeral=True)
+            await refuse(interaction, "Disponible sur un serveur.")
             return
         chosen = niveau.value if niveau.value in LEVELS else None
         await asyncio.to_thread(
@@ -200,7 +184,7 @@ async def _toggle(
 ) -> None:
     place = _place(interaction)
     if place is None:
-        await interaction.response.send_message("Salon de serveur requis.", ephemeral=True)
+        await refuse(interaction, "Salon de serveur requis.")
         return
     guild, channel = place
     database = _app(bot).database
@@ -225,7 +209,7 @@ _MODES_TEXT = {
 def _snapshot(app: App, guild_id: int, channel_id: int) -> tuple[str, str]:
     guild = app.database.fetchone(
         """
-        SELECT mode, spontaneity, python_blocked, personality
+        SELECT mode, spontaneity, python_blocked
         FROM guild_settings WHERE guild_id = ?
         """,
         (guild_id,),
@@ -244,7 +228,6 @@ def _snapshot(app: App, guild_id: int, channel_id: int) -> tuple[str, str]:
         ("Vocaux transcrits", channel is not None and bool(channel["auto_transcribe"])),
         ("run_python", guild is None or not guild["python_blocked"]),
     ]
-    personality = "propre au serveur" if guild is not None and guild["personality"] else "défaut"
     messages, tokens, ceiling = app.conversation.usage(channel_id)
     share = min(100, round(100 * tokens / ceiling)) if ceiling else 0
     filled = share // 5
@@ -254,7 +237,6 @@ def _snapshot(app: App, guild_id: int, channel_id: int) -> tuple[str, str]:
         f"`{'█' * filled}{'░' * (20 - filled)}` {share} %",
         "",
         f"**Spontanéité** · {spontaneity}",
-        f"**Personnalité** · {personality}",
         " · ".join(f"{label} {'✅' if on else '❌'}" for label, on in flags),
         f"-# {len(app.capabilities.names())} outils disponibles",
     ]

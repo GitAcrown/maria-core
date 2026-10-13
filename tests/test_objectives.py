@@ -1,5 +1,6 @@
 """Échéances, bail, créneau unique, relances, outils."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -10,12 +11,13 @@ from maria_core.config import Settings
 from maria_core.db import Database
 from maria_core.llm.types import ToolCall
 from maria_core.objectives.model import StaleObjective
-from maria_core.objectives.pipeline import Delivery, Written
+from maria_core.objectives.pipeline import Delivery, Pipeline, Written
 from maria_core.objectives.price import extract_price
 from maria_core.objectives.quota import MAX_OPEN
 from maria_core.objectives.runtime import Objectives
 from maria_core.objectives.schedule import PARIS, next_due, time_key
 from maria_core.objectives.signals import ObjectiveSignal
+from maria_core.objectives.store import ObjectiveStore
 from maria_core.objectives.tools import objective_capabilities
 
 _PARIS = ZoneInfo("Europe/Paris")
@@ -487,4 +489,45 @@ async def test_tools_create_pause_and_list(tmp_path: Path) -> None:
         registry, settings, context, ToolCall(id="3", name="objective_list", arguments={})
     )
     assert listed.data["objectives"][0]["when"].startswith("chaque")
+    database.close()
+
+
+async def test_a_page_watch_fires_when_the_content_changes_not_on_a_price(tmp_path: Path) -> None:
+    now = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)
+    pages = ["Chapitre 10 en ligne. Abonnement 9,90 €."]
+    asked: list[str] = []
+
+    async def fetch(_url: str) -> str:
+        return pages[0]
+
+    async def judge(rule: str, evidence: str) -> bool:
+        asked.append(rule)
+        return "Chapitre 11" in evidence
+
+    database = Database(tmp_path / "maria.db")
+    database.migrate()
+    store = ObjectiveStore(database)
+    objective, _created = store.create(
+        owner_id=7,
+        guild_id=5,
+        channel_ids=(3,),
+        deliver="channel",
+        title="Nouveau chapitre",
+        trigger={"type": "interval", "every_s": 21600},
+        condition={"type": "page_changed", "text": "le dernier chapitre"},
+        action={"type": "fetch_then", "url": "https://manga.test", "text": "Nouveau chapitre !"},
+        now=now,
+    )
+    pipeline = Pipeline(database, fetcher=fetch, judge=judge)
+    first = await pipeline.run(objective, now=now, signal=None)
+    assert first.kind == "skipped"
+    assert asked == []
+    assert "price" not in first.state
+    pages[0] = "Chapitre 11 en ligne. Abonnement 9,90 €."
+    second = await pipeline.run(replace(objective, state=first.state), now=now, signal=None)
+    assert second.kind == "sent"
+    assert "le dernier chapitre" in asked[0]
+    assert second.delivery is not None
+    assert second.delivery.text.startswith("Nouveau chapitre !")
+    assert "Surveillance" in second.delivery.footer
     database.close()

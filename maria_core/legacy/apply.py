@@ -161,8 +161,8 @@ def _insert_guild(database: Database, item: GuildDraft, stamp: str) -> None:
     database.execute(
         """
         INSERT INTO guild_settings (
-            guild_id, mode, personality, spontaneity, python_enabled, updated_at
-        ) VALUES (?, ?, '', 'normal', 0, ?)
+            guild_id, mode, spontaneity, python_enabled, updated_at
+        ) VALUES (?, ?, 'normal', 0, ?)
         ON CONFLICT(guild_id) DO UPDATE SET mode = excluded.mode, updated_at = excluded.updated_at
         """,
         (item.guild_id, item.mode, stamp),

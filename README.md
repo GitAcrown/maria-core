@@ -44,9 +44,9 @@ Slash (après `5!sync`) :
 | Commande | Rôle |
 |---|---|
 | `/moi`, `/global` | Souvenirs, propositions, oublier, annuler une modification |
-| `/taches` | Objectifs ouverts : pause, reprise, saut, confirmation, suppression |
+| `/programmes` | Rappels, écoutes et surveillances : pause, reprise, saut, confirmation, suppression |
 | `/info` | Réglages du salon et outils disponibles |
-| `/chatbot mode\|forget\|everyone\|autotranscribe\|python\|spontaneite\|personnalite` | Réglages, modérateurs |
+| `/chatbot mode\|forget\|everyone\|autotranscribe\|python\|spontaneite` | Réglages, modérateurs |
 | `/preferences propositions\|reactions` | Réglages personnels |
 
 Préfixe (`5!` par défaut) : `spontaneite`, `moi`, `global`. Propriétaire : `why <lien>`, `status`, `keys`, `presence`, `plugin load|unload|reload`, `sync`, `update`, `restart`, `shutdown`.

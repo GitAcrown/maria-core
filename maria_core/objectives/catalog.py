@@ -18,6 +18,7 @@ _KINDS = (
     ("condition", "price_lower", "Le prix est plus bas qu'au passage précédent"),
     ("condition", "price_higher", "Le prix est plus haut qu'au passage précédent"),
     ("condition", "judge", "Un jugement sur un texte"),
+    ("condition", "page_changed", "Ce qui compte sur la page a changé"),
     ("action", "remind", "Message envoyé tel quel"),
     ("action", "alert", "Message court à partir d'un gabarit"),
     ("action", "report", "Texte rédigé pour l'échéance"),

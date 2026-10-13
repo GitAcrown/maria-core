@@ -2,13 +2,22 @@
 
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote as escape
 
 from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.capabilities.http import HttpClient, HttpError, parse_json, with_query
 from maria_core.plugins import PluginHost
 from maria_core.ui.emojis import GAMES
-from maria_core.ui.widgets import Rendered, card, footer, separator, text, thumbnail
+from maria_core.ui.widgets import (
+    Rendered,
+    card,
+    footer,
+    joined,
+    quote,
+    separator,
+    text,
+    thumbnail,
+)
 
 _SEARCH = "https://store.steampowered.com/api/storesearch/"
 _DETAILS = "https://store.steampowered.com/api/appdetails"
@@ -66,21 +75,20 @@ def render_game(data: Mapping[str, Any]) -> Rendered:
     if not data.get("name"):
         return Rendered()
     app_id = str(data.get("app_id") or "")
-    lines = [str(data.get("price_line") or "Prix inconnu")]
+    lines = [str(data.get("price_line") or "*Prix inconnu.*")]
     if data.get("review"):
-        lines.append(str(data["review"]))
+        lines.append(f"**Steam** · {data['review']}")
     description = str(data.get("description") or "").strip()
-    if description:
-        lines.append(f"-# {description[:260]}{'…' if len(description) > 260 else ''}")
-    meta = "  ·  ".join(["Jeu", *(data.get("genres") or [])[:3]])
-    parts = [f"par {data['developer']}"] if data.get("developer") else []
-    if app_id:
-        parts.append(f"[Steam](<{_STORE.format(app_id)}>)")
+    if len(description) > 300:
+        description = description[:300].rstrip(" ,;:") + "…"
+    meta = joined("Jeu", *(data.get("genres") or [])[:3])
+    link = f"[Steam](<{_STORE.format(app_id)}>)" if app_id else ""
     built = card(
         text(f"## {GAMES} {data['name']}\n-# {meta}"),
         separator(wide=True),
         thumbnail("\n".join(lines), _HEADER.format(app_id) if app_id else ""),
-        footer(" · ".join(parts)),
+        text(quote(description)) if description else None,
+        footer(joined(data.get("developer"), link)),
     )
     note = f"{data['name']} : {data.get('price') or 'prix inconnu'}. {data.get('review_label', '')}"
     return Rendered(cards=(built,), note=note.strip())
@@ -103,7 +111,7 @@ async def _find(http: HttpClient, query: str) -> dict[str, Any] | None:
 async def _details(http: HttpClient, app_id: str) -> dict[str, Any]:
     if not app_id:
         return {}
-    response = await http.request("GET", f"{_DETAILS}?appids={quote(app_id)}&l=french&cc=FR")
+    response = await http.request("GET", f"{_DETAILS}?appids={escape(app_id)}&l=french&cc=FR")
     payload = parse_json(response)
     block = payload.get(app_id) if isinstance(payload, dict) else None
     data = block.get("data") if isinstance(block, dict) else None
@@ -126,7 +134,7 @@ async def _review(http: HttpClient, app_id: str) -> dict[str, str]:
     if not app_id:
         return {}
     url = with_query(
-        _REVIEWS.format(quote(app_id)),
+        _REVIEWS.format(escape(app_id)),
         {"json": "1", "language": "all", "purchase_type": "all", "num_per_page": "0"},
     )
     try:

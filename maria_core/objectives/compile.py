@@ -53,6 +53,8 @@ def compile_condition(args: Mapping[str, Any], types: ObjectiveTypes) -> dict[st
             raise ValueError("Il manque la condition à juger (condition_text).")
         when = "before" if str(args.get("condition_when") or "") == "before" else "after"
         return {"type": "judge", "text": text, "when": when}
+    if kind == "page_changed":
+        return {"type": kind, "text": str(args.get("condition_text") or "").strip()}
     if kind == "price_drop":
         return {"type": kind, "percent": _amount(args.get("threshold"))}
     if kind in {"price_lower", "price_higher"}:
@@ -68,6 +70,8 @@ def check_plan(
     fetching = action.get("type") == "fetch_then"
     if condition is not None and condition.get("type") in PRICE_CONDITIONS and not fetching:
         raise ValueError("Une condition de prix demande action_type=fetch_then avec une url.")
+    if condition is not None and condition.get("type") == "page_changed" and not fetching:
+        raise ValueError("page_changed demande action_type=fetch_then avec une url ou une query.")
     if kind == "on_message" and (condition is None or condition.get("type") != "judge"):
         raise ValueError("on_message demande une condition judge, sinon chaque message alerte.")
     if fetching and kind == "interval" and int(trigger.get("every_s") or 0) < MIN_FETCH_INTERVAL_S:

@@ -59,14 +59,18 @@ class Hub(discord.ui.LayoutView):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.viewer_id:
             return True
-        await interaction.response.send_message("Ce menu n'est pas le tien.", ephemeral=True)
+        await interaction.response.send_message(
+            "**Action impossible ·** Ce menu ne s'affiche que pour toi.",
+            ephemeral=True,
+            delete_after=10,
+        )
         return False
 
     async def on_error(
         self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item
     ) -> None:
         logger.error("Menu %s en échec", type(self).__name__, exc_info=error)
-        text = "**Erreur** · le bouton a planté, réessaie."
+        text = "**Erreur ·** Le bouton a planté. Réessaie."
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(text, ephemeral=True)
@@ -105,6 +109,13 @@ class Action(discord.ui.Button):
         await self.run(interaction)
 
 
+async def refuse(interaction: discord.Interaction, reason: str) -> None:
+    """Refus éphémère qui s'efface seul, comme dans CRIT."""
+    await interaction.response.send_message(
+        f"**Action impossible ·** {reason}", ephemeral=True, delete_after=10
+    )
+
+
 class Picker(discord.ui.Select):
     def __init__(self, placeholder: str, options: list[discord.SelectOption], run: Pick) -> None:
         super().__init__(placeholder=placeholder, options=options[:25])
@@ -131,10 +142,15 @@ def thin() -> discord.ui.Separator:
     return discord.ui.Separator(spacing=discord.SeparatorSpacing.small)
 
 
-def option(value: int | str, label: str, description: str = "") -> discord.SelectOption:
+def option(
+    value: int | str, label: str, description: str = "", emoji: str = ""
+) -> discord.SelectOption:
     shown = " ".join(label.split())[:100] or str(value)
     return discord.SelectOption(
-        label=shown, value=str(value), description=" ".join(description.split())[:100] or None
+        label=shown,
+        value=str(value),
+        description=" ".join(description.split())[:100] or None,
+        emoji=emoji or None,
     )
 
 

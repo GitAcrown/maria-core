@@ -484,7 +484,7 @@ def test_imported_reminders_become_reports_so_the_instruction_runs(tmp_path: Pat
     older = tmp_path / "migrations"
     older.mkdir()
     for path in sorted(DEFAULT_MIGRATIONS.glob("*.sql")):
-        if not path.name.startswith("012"):
+        if path.name < "012":
             shutil.copy(path, older / path.name)
     database = Database(tmp_path / "maria.db", migrations_dir=older)
     database.migrate()

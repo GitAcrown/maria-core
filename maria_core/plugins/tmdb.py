@@ -7,7 +7,17 @@ from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.capabilities.http import HttpClient, HttpError, parse_json, with_query
 from maria_core.plugins import PluginHost
 from maria_core.ui.emojis import MOVIE, TV
-from maria_core.ui.widgets import Rendered, card, footer, separator, text, thumbnail
+from maria_core.ui.widgets import (
+    Rendered,
+    card,
+    footer,
+    grouped,
+    joined,
+    quote,
+    separator,
+    text,
+    thumbnail,
+)
 
 _BASE = "https://api.themoviedb.org/3"
 _POSTER = "https://image.tmdb.org/t/p/w500{}"
@@ -61,17 +71,16 @@ def render_media(data: Mapping[str, Any]) -> Rendered:
     title = f"## {_TYPE_EMOJI.get(kind, MOVIE)} {data.get('title')}"
     if year:
         title += f"  ·  {year}"
-    meta = "  ·  ".join([_TYPE_LABEL.get(kind, "Média"), *(data.get("genres") or [])[:3]])
+    meta = joined(_TYPE_LABEL.get(kind, "Média"), *(data.get("genres") or [])[:3])
     overview = str(data.get("overview") or "").strip()
     if len(overview) > _OVERVIEW:
-        overview = overview[:_OVERVIEW] + "…"
-    rating = _rating(data)
-    body = f"{rating}\n{overview}" if rating else overview
-    body = body.strip() or "-# Aucune description disponible."
+        overview = overview[:_OVERVIEW].rstrip(" ,;:") + "…"
+    head = _rating(data) or "*Pas encore de note TMDB.*"
     built = card(
         text(f"{title}\n-# {meta}"),
         separator(wide=True),
-        thumbnail(body, str(data.get("poster") or "")),
+        thumbnail(head, str(data.get("poster") or "")),
+        text(quote(overview) if overview else "-# Aucune description disponible."),
         footer(_footer(data)),
     )
     note = f"{data.get('title')} ({year}) : {data.get('vote')}/10, {meta}. {overview[:200]}"
@@ -81,10 +90,11 @@ def render_media(data: Mapping[str, Any]) -> Rendered:
 def _rating(data: Mapping[str, Any]) -> str:
     vote = float(data.get("vote") or 0)
     count = int(data.get("votes") or 0)
-    if vote and count:
-        full = round(vote / 2)
-        return f"{'★' * full}{'☆' * (5 - full)}  **{vote:.1f}/10**  ·  {count:,} votes"
-    return f"**{vote:.1f}/10**" if vote else ""
+    if not vote:
+        return ""
+    full = round(vote / 2)
+    votes = f"  ·  {grouped(count)} votes" if count else ""
+    return f"**TMDB** · {'★' * full}{'☆' * (5 - full)}  **{vote:.1f}/10**{votes}"
 
 
 def _footer(data: Mapping[str, Any]) -> str:
@@ -93,7 +103,7 @@ def _footer(data: Mapping[str, Any]) -> str:
         parts.append(f"[TMDB](<{data['url']}>)")
     if data.get("others"):
         parts.append("aussi : " + ", ".join(data["others"]))
-    return " · ".join(parts) or "TMDB"
+    return joined(*parts) or "TMDB"
 
 
 async def _search(http: HttpClient, api_key: str, query: str) -> list[dict[str, Any]]:
