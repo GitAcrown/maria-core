@@ -21,7 +21,7 @@ from maria_core.ui.widgets import Card
 
 _DAYS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 _PAGE_CHARS = 1500
-_SNAPSHOT = 300
+_SNAPSHOT = 1200
 
 type Fetcher = Callable[[str], Awaitable[str]]
 type Searcher = Callable[[str], Awaitable[tuple[str, str]]]
@@ -64,6 +64,7 @@ class Pass:
     previous: float | None = None
     url: str = ""
     page: str = ""
+    seen_before: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -102,7 +103,9 @@ class Pipeline:
         runs: tuple[tuple[str, str], ...] = (),
     ) -> Outcome:
         current = Pass(
-            evidence=trigger_evidence(now, signal, objective.state), state=dict(objective.state)
+            evidence=trigger_evidence(now, signal, objective.state),
+            state=dict(objective.state),
+            seen_before=str(objective.state.get("last_result") or ""),
         )
         condition = objective.condition
         if _before(condition) and not await self._judge(condition, current.evidence):
@@ -138,7 +141,8 @@ class Pipeline:
             return "skipped"
         current.url = url
         current.page = " ".join(page.split())[:_PAGE_CHARS]
-        await self._price(current, page)
+        if (objective.condition or {}).get("type") in PRICE_CONDITIONS:
+            await self._price(current, page)
         if current.price is not None:
             current.page = f"Prix détecté : {current.price:.2f} €. {current.page}"
         current.evidence = f"{current.evidence}\n\nPage :\n{current.page}".strip()
@@ -169,7 +173,19 @@ class Pipeline:
                 return False
             alerted = _number(current.state.get("alerted_price"))
             return alerted is None or current.price is None or abs(current.price - alerted) >= 0.01
+        if condition.get("type") == "page_changed":
+            return await self._changed(condition, current)
         return await self._judge(condition, current.evidence)
+
+    async def _changed(self, condition: Mapping[str, Any], current: Pass) -> bool:
+        """Premier passage : on garde un relevé, rien n'est envoyé. Ensuite, le modèle compare."""
+        if not current.seen_before.strip():
+            return False
+        if " ".join(current.seen_before.split()) == " ".join(current.page[:_SNAPSHOT].split()):
+            return False
+        focus = str(condition.get("text") or "").strip() or "le contenu principal de la page"
+        rule = f"Ce qui compte ({focus}) a changé par rapport au résultat précédent."
+        return await self._judge({"text": rule}, current.evidence)
 
     async def _judge(self, condition: Mapping[str, Any] | None, evidence: str) -> bool:
         text = str((condition or {}).get("text") or "").strip()

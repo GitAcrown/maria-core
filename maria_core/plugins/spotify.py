@@ -9,7 +9,7 @@ from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.capabilities.http import HttpClient, HttpError, parse_json, with_query
 from maria_core.plugins import PluginHost
 from maria_core.ui.emojis import MUSIC
-from maria_core.ui.widgets import Rendered, card, thumbnail
+from maria_core.ui.widgets import Rendered, card, joined, thumbnail
 
 _TOKEN = "https://accounts.spotify.com/api/token"
 _SEARCH = "https://api.spotify.com/v1/search"
@@ -73,7 +73,7 @@ def render_track(data: Mapping[str, Any]) -> Rendered:
     if best.get("url"):
         meta.append(f"[Spotify](<{best['url']}>)")
     if meta:
-        lines.append(f"-# {' · '.join(meta)}")
+        lines.append(f"-# {joined(*meta)}")
     built = card(thumbnail("\n".join(lines), str(best.get("cover") or "")))
     return Rendered(cards=(built,), note=f"{best['artists']} — {best['name']} ({best['album']})")
 

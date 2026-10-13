@@ -11,7 +11,7 @@ from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.capabilities.http import HttpClient, HttpError, parse_json, with_query
 from maria_core.plugins import PluginHost
 from maria_core.ui.emojis import YOUTUBE
-from maria_core.ui.widgets import Rendered, card, thumbnail
+from maria_core.ui.widgets import Rendered, card, joined, thumbnail
 
 _OEMBED = "https://www.youtube.com/oembed"
 _LANGS = ("fr", "fr-FR", "en", "en-US")
@@ -72,7 +72,7 @@ def render_youtube(data: Mapping[str, Any]) -> Rendered:
     if data.get("truncated"):
         meta.append("transcription tronquée")
     meta.append(f"[YouTube](<{url}>)")
-    lines.append(f"-# {' · '.join(meta)}")
+    lines.append(f"-# {joined(*meta)}")
     built = card(thumbnail("\n".join(lines), f"https://i.ytimg.com/vi/{video}/hqdefault.jpg"))
     return Rendered(cards=(built,), note=f"Vidéo lue : {title} — {data.get('author', '')}")
 

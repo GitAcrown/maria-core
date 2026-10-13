@@ -1,4 +1,4 @@
-"""/taches : catalogue par type (Rappel, Écoute, Surveillance…), fiche, actions. Comme MARIA_R."""
+"""/programmes : catalogue par type (Rappel, Écoute, Surveillance…), fiche et actions."""
 
 import asyncio
 
@@ -22,6 +22,7 @@ from maria_core.objectives.labels import condition_text, kind_label, status_labe
 from maria_core.objectives.model import Objective, ObjectiveQuota, StaleObjective
 from maria_core.objectives.schedule import describe
 from maria_core.objectives.tools import operate
+from maria_core.ui.emojis import KIND_ICONS
 
 PAGE = 5
 _RANK = {"draft": 0, "active": 1, "paused": 2, "failed": 3}
@@ -74,8 +75,8 @@ class TaskHub(Hub):
         if not shown:
             content.append(
                 body(
-                    "Rien pour l'instant.\n-# Dis-moi « rappelle-moi… », « préviens-moi si… » "
-                    "ou « surveille ce prix »."
+                    "*Rien de prévu pour l'instant.*\n-# Dis-moi « rappelle-moi… », "
+                    "« préviens-moi si… » ou « surveille cette page »."
                 )
             )
         for index, item in enumerate(shown):
@@ -86,7 +87,9 @@ class TaskHub(Hub):
             content += [thin(), body(f"-# {self.note}")]
         rows: list[discord.ui.ActionRow] = []
         if shown:
-            options = [option(item.id, _name(item), _plain_meta(item)) for item in shown]
+            options = [
+                option(item.id, item.title, _plain_meta(item), _icon(item)) for item in shown
+            ]
             rows.append(discord.ui.ActionRow(Picker("Ouvrir une tâche…", options, self._open)))
         if total > 1:
             rows.append(
@@ -111,7 +114,10 @@ class TaskHub(Hub):
     def _detail(self, item: Objective) -> None:
         kind = _kind(item)
         content: list[discord.ui.Item] = [
-            title(clip(f"{kind} · {item.title}", 90), status_label(item.status, kind)),
+            title(
+                clip(f"{_icon(item)} {item.title}", 90),
+                f"{kind} · {status_label(item.status, kind)}",
+            ),
             wide(),
             body(objective_facts(item)),
         ]
@@ -207,13 +213,17 @@ def _name(item: Objective) -> str:
     return clip(f"{_kind(item)} · {item.title}", 100)
 
 
+def _icon(item: Objective) -> str:
+    return KIND_ICONS.get(_kind(item), "🗓️")
+
+
 def _when(item: Objective) -> float:
     return item.next_run_at.timestamp() if item.next_run_at else float("inf")
 
 
 def _entry(item: Objective) -> str:
     """Titre `###`, une ligne de contenu si elle apporte quelque chose, puis la méta."""
-    lines = [f"### {clip(_name(item), 90)}"]
+    lines = [f"### {_icon(item)} {clip(item.title, 90)}"]
     detail = condition_text(item.condition) or str(item.action.get("text") or "")
     if detail and detail.casefold() != item.title.casefold():
         lines.append(clip(detail, 160))
@@ -222,7 +232,7 @@ def _entry(item: Objective) -> str:
 
 
 def _meta(item: Objective) -> str:
-    bits = [status_label(item.status, _kind(item)), describe(item.trigger)]
+    bits = [_kind(item), status_label(item.status, _kind(item)), describe(item.trigger)]
     if item.next_run_at is not None and item.status == "active":
         bits.append(f"<t:{int(item.next_run_at.timestamp())}:R>")
     if item.max_fires and item.max_fires > 1:
@@ -233,7 +243,7 @@ def _meta(item: Objective) -> str:
 
 
 def _plain_meta(item: Objective) -> str:
-    return f"{status_label(item.status, _kind(item))} · {describe(item.trigger)}"
+    return f"{_kind(item)} · {status_label(item.status, _kind(item))} · {describe(item.trigger)}"
 
 
 def objective_facts(item: Objective) -> str:

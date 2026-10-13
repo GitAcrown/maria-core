@@ -2,7 +2,7 @@
 
 from collections import Counter
 from collections.abc import Mapping
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -24,12 +24,11 @@ _DAYS_FULL = ("Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dima
 _DAYS_SHORT = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
 _WIND = ("N", "NE", "E", "SE", "S", "SO", "O", "NO")
 _PERIODS = (
-    ("🌙 Nuit", 0, 6),
     ("🌅 Matin", 6, 12),
     ("☀️ Après-midi", 12, 18),
-    ("🌆 Soir", 18, 24),
+    ("🌆 Soir", 18, 22),
+    ("🌙 Nuit", 0, 6),
 )
-_RAINY = 0.2
 
 
 def current(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -52,8 +51,6 @@ def current(raw: Mapping[str, Any]) -> dict[str, Any]:
         "wind_kmh": round(float(wind.get("speed") or 0) * 3.6),
         "wind_dir": wind_dir(float(wind.get("deg") or 0)),
         "visibility_km": round(float(raw.get("visibility") or 10000) / 1000, 1),
-        "sunrise": _local_clock((raw.get("sys") or {}).get("sunrise"), raw.get("timezone")),
-        "sunset": _local_clock((raw.get("sys") or {}).get("sunset"), raw.get("timezone")),
     }
 
 
@@ -71,7 +68,6 @@ def week(city: str, raw: Mapping[str, Any]) -> dict[str, Any]:
                 "max": round(max(temps)),
                 "min": round(min(temps)),
                 "description": _common([_desc(slot) for slot in slots]).capitalize(),
-                "rain": _rain(slots),
             }
         )
     return {"kind": "week", "city": full, "days": days}
@@ -96,7 +92,6 @@ def day(city: str, raw: Mapping[str, Any], target: date, today: date) -> dict[st
         "wind_kmh": round(sum(float(w.get("speed") or 0) for w in winds) / len(winds) * 3.6),
         "wind_dir": wind_dir(sum(float(w.get("deg") or 0) for w in winds) / len(winds)),
         "description": _common([_desc(slot) for slot in slots]).capitalize(),
-        "rain": _rain(slots),
     }
 
 
@@ -130,9 +125,6 @@ def summary(data: Mapping[str, Any]) -> str:
 
 
 def emoji(icon: str) -> str:
-    """Icône OpenWeather -> emoji ; la nuit, lune plutôt que soleil."""
-    if icon.endswith("n") and icon[:2] in {"01", "02"}:
-        return "🌙" if icon[:2] == "01" else "☁️"
     return _ICONS.get(icon[:2], "🌡️")
 
 
@@ -145,11 +137,6 @@ def _current_card(data: Mapping[str, Any]) -> Card:
         f"💨 **{data['wind_kmh']} km/h** {data['wind_dir']}  ·  💧 **{data['humidity']}%**"
         f"  ·  👁 {data['visibility_km']} km  ·  🌡 {data['pressure']} hPa"
     )
-    sun = [
-        f"{icon} {data[key]}"
-        for icon, key in (("🌅", "sunrise"), ("🌇", "sunset"))
-        if data.get(key)
-    ]
     return card(
         text(f"## {data['emoji']} {data['city']}"),
         separator(wide=True),
@@ -158,49 +145,39 @@ def _current_card(data: Mapping[str, Any]) -> Card:
             f"  ·  {data['min']}° / {data['max']}°"
         ),
         separator(),
-        text(details + (f"\n-# {'  ·  '.join(sun)}" if sun else "")),
-        footer(f"{_stamp()} · OpenWeather"),
+        text(details),
+        footer(f"{_stamp()} · OWM"),
     )
 
 
 def _week_card(data: Mapping[str, Any]) -> Card:
-    blocks = [text(f"## 📅 {data.get('city')}\n-# Prévisions sur 5 jours"), separator(wide=True)]
+    blocks = [text(f"## {data.get('city')} — Prévisions 5 jours"), separator(wide=True)]
     days = [item for item in data.get("days") or [] if isinstance(item, dict)]
     for index, item in enumerate(days):
-        if index:
-            blocks.append(separator())
         blocks.append(
             text(
                 f"**{item['label']}**  {item['emoji']}  **{item['max']}°** / {item['min']}°"
-                f"\n-# {item['description']}{_rain_note(item.get('rain'))}"
+                f"  ·  {item['description']}"
             )
         )
-    blocks.append(footer(f"{_stamp()} · OpenWeather"))
+        if index < len(days) - 1:
+            blocks.append(separator())
+    blocks.append(footer(f"{_stamp()} · OWM"))
     return card(*blocks)
 
 
 def _day_card(data: Mapping[str, Any]) -> Card:
-    blocks = [
-        text(f"## {data['emoji']} {data['label']} · {data['city']}\n-# {data['description']}"),
-        separator(wide=True),
-    ]
+    blocks = [text(f"## {data['emoji']} {data['label']} · {data['city']}"), separator(wide=True)]
     for item in data.get("periods") or []:
-        blocks.append(
-            text(
-                f"**{item['label']}**  {item['emoji']}  **{item['temp']}°C**"
-                f"\n-# {item['description']}  ·  💨 {item['wind_kmh']} km/h"
-                f"{_rain_note(item.get('rain'))}"
-            )
-        )
-        blocks.append(separator())
-    blocks.append(
+        blocks += [text(f"{item['label']}  {item['emoji']}  **{item['temp']}°C**"), separator()]
+    return card(
+        *blocks,
         text(
             f"🌡 **{data['max']}°** / {data['min']}°  ·  💧 {data['humidity']}%"
             f"  ·  💨 {data['wind_kmh']} km/h {data['wind_dir']}"
-        )
+        ),
+        footer(f"{_stamp()} · OWM"),
     )
-    blocks.append(footer(f"{_stamp()} · OpenWeather"))
-    return card(*blocks)
 
 
 def _by_day(raw: Mapping[str, Any]) -> dict[str, list[Mapping[str, Any]]]:
@@ -220,39 +197,14 @@ def _periods(slots: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
             continue
         temps = [float(slot["main"]["temp"]) for slot in chosen]
         icon = _common([str(_weather(slot).get("icon") or "01d") for slot in chosen])
-        speeds = [float((slot.get("wind") or {}).get("speed") or 0) for slot in chosen]
-        found.append(
-            {
-                "label": label,
-                "emoji": emoji(icon),
-                "temp": round(sum(temps) / len(temps)),
-                "description": _common([_desc(slot) for slot in chosen]).capitalize(),
-                "wind_kmh": round(sum(speeds) / len(speeds) * 3.6),
-                "rain": _rain(chosen),
-            }
-        )
+        found.append({"label": label, "emoji": emoji(icon), "temp": round(sum(temps) / len(temps))})
     return found
 
 
-def _rain(slots: list[Mapping[str, Any]]) -> int:
-    """Probabilité de précipitations la plus haute sur les créneaux, en %."""
-    return round(max((float(slot.get("pop") or 0) for slot in slots), default=0) * 100)
-
-
-def _rain_note(rain: object) -> str:
-    return f"  ·  ☔ {rain}%" if isinstance(rain, int) and rain >= _RAINY * 100 else ""
-
-
-def _local_clock(timestamp: object, offset: object) -> str:
-    """Heure locale de la ville (décalage OpenWeather en secondes), Paris à défaut."""
-    if not isinstance(timestamp, int | float) or not timestamp:
-        return ""
-    zone = timezone(timedelta(seconds=int(offset))) if isinstance(offset, int) else PARIS
-    return datetime.fromtimestamp(int(timestamp), tz=zone).strftime("%H:%M")
-
-
 def _in_period(hour: int, start: int, end: int) -> bool:
-    return start <= hour < end
+    if start < end:
+        return start <= hour < end
+    return hour < end or hour >= 22
 
 
 def _hour(slot: Mapping[str, Any]) -> int:

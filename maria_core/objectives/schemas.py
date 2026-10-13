@@ -21,6 +21,7 @@ CONDITIONS = [
     "price_lower",
     "price_higher",
     "judge",
+    "page_changed",
 ]
 
 GUIDE = (
@@ -33,8 +34,11 @@ GUIDE = (
     "report = texte rédigé au moment voulu avec tes outils (météo, résumé, actu, blague) ; "
     "fetch_then = lire url ou chercher query, puis condition, puis message (write=true pour "
     "rédiger).\n"
-    "- Prix : condition_type price_below/price_above + threshold, price_drop + threshold en %, "
-    "price_lower/price_higher = par rapport au passage précédent. Sinon judge + condition_text ; "
+    "- Surveiller une page (stock, chapitre, résultat, statut, annonce…) : fetch_then + url, "
+    "puis judge + condition_text (« le produit est en stock ») ou page_changed (prévenir quand "
+    "ça change ; condition_text = ce qui compte, sinon le contenu principal). "
+    "Prix seulement : price_below/price_above + threshold, price_drop + threshold en %, "
+    "price_lower/price_higher = par rapport au passage précédent. Judge hors page : "
     "condition_when=before juge le déclencheur (le message) avant l'action.\n"
     "- Écoute : on_topic avec pattern (mot cité, variantes séparées par des virgules) ou topic "
     "(sujet flou). « quand JE dis » → author=self. Vocal : on_voice + voice_event "

@@ -64,7 +64,7 @@ class TurnRunner:
         return outcome
 
     def system(self, data: TurnInput) -> str:
-        parts = [data.policy.personality.strip(), self._prompt.render()]
+        parts = [self._prompt.render()]
         parts.append(turn_header(data.message, model=data.model))
         parts.extend(item.strip() for item in data.extras if item and item.strip())
         if data.silence:

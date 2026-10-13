@@ -136,10 +136,11 @@ async def test_task_hub_names_each_kind_and_confirms_deletion() -> None:
     hub.build()
     text = _texts(hub)
     assert _fits_discord(hub)
-    assert "### Rappel · Tâche 1" in text
-    assert "### Rappel récurrent · Tâche 2" in text
-    assert "### Écoute · Tâche 3" in text
-    assert "### Surveillance · Tâche 4" in text
+    assert "### ⏰ Tâche 1\n" in text
+    assert "-# Rappel · active" in text
+    assert "-# Rappel récurrent · active" in text
+    assert "### 👂 Tâche 3" in text
+    assert "-# Surveillance · en veille" in text
     hub.selected, hub.screen = 2, "detail"
     hub.build()
     assert _labels(hub) == ["Pause", "Passer une fois", "Supprimer", "Retour"]
@@ -152,7 +153,7 @@ async def test_task_hub_names_each_kind_and_confirms_deletion() -> None:
 async def test_draft_card_shows_what_will_be_created_then_its_outcome() -> None:
     draft = _objective(9, {"type": "at", "at": "2026-10-14T09:00"}, status="draft")
     view = DraftView(9, draft)
-    assert "## Rappel · Tâche 9\n-# brouillon · à confirmer" in _texts(view)
+    assert "## ⏰ Tâche 9\n-# Rappel · brouillon · à confirmer" in _texts(view)
     assert "**Message** · Sortir le chien" in _texts(view)
     assert _labels(view) == ["Confirmer", "Annuler"]
     done = outcome(draft, confirmed=False)

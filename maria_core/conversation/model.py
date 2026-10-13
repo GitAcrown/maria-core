@@ -36,7 +36,6 @@ class Policy:
     mode: ReplyMode
     respond_everyone: bool = False
     auto_transcribe: bool = False
-    personality: str = ""
 
 
 @dataclass(frozen=True, slots=True)

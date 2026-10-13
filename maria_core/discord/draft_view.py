@@ -13,6 +13,7 @@ from maria_core.discord.task_menu import objective_facts
 from maria_core.objectives.labels import kind_label
 from maria_core.objectives.model import Objective, StaleObjective
 from maria_core.objectives.tools import apply
+from maria_core.ui.emojis import KIND_ICONS
 
 _HINT = "-# Confirme ici, ou réponds « oui » / « non » dans le salon."
 
@@ -48,8 +49,9 @@ class DraftView(discord.ui.LayoutView):
 
 def draft_card(objective: Objective, meta: str) -> list[discord.ui.Item]:
     kind = kind_label(objective.trigger, objective.action, objective.condition)
+    icon = KIND_ICONS.get(kind, "🗓️")
     return [
-        title(clip(f"{kind} · {objective.title}", 90), meta),
+        title(clip(f"{icon} {objective.title}", 90), f"{kind} · {meta}"),
         wide(),
         body(objective_facts(objective)),
     ]
@@ -62,8 +64,9 @@ def outcome(objective: Objective, confirmed: bool) -> discord.ui.LayoutView:
         view.add_item(discord.ui.Container(*draft_card(objective, "activée")))
     else:
         kind = kind_label(objective.trigger, objective.action, objective.condition)
+        icon = KIND_ICONS.get(kind, "🗓️")
         view.add_item(
-            discord.ui.Container(title(clip(f"{kind} · {objective.title}", 90), "annulée"))
+            discord.ui.Container(title(clip(f"{icon} {objective.title}", 90), f"{kind} · annulée"))
         )
     return view
 
@@ -80,12 +83,20 @@ async def settle(interaction: discord.Interaction, objective_id: int, op: str) -
         return
     objective = await asyncio.to_thread(app.objectives.store.get, objective_id)
     if objective is None or objective.owner_id != interaction.user.id:
-        await interaction.response.send_message("Ce brouillon n'est pas le tien.", ephemeral=True)
+        await interaction.response.send_message(
+            "**Action impossible ·** Ce brouillon n'est pas le tien.",
+            ephemeral=True,
+            delete_after=10,
+        )
         return
     try:
         saved = await asyncio.to_thread(apply, app.objectives, objective, {"op": op})
     except (StaleObjective, ValueError):
-        await interaction.response.send_message("Ce brouillon est déjà traité.", ephemeral=True)
+        await interaction.response.send_message(
+            "**Action impossible ·** Ce brouillon est déjà traité.",
+            ephemeral=True,
+            delete_after=10,
+        )
         return
     await interaction.response.edit_message(
         view=outcome(saved, op == "confirm"), allowed_mentions=NO_PINGS

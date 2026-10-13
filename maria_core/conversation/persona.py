@@ -1,4 +1,4 @@
-"""Personnalité par défaut et repères de temps. Un serveur peut précéder la personnalité."""
+"""Personnalité de MARIA et repères de temps."""
 
 from collections.abc import Callable
 from datetime import UTC, datetime

@@ -89,7 +89,9 @@ class MemoryHub(Hub):
         if self.tab == "memories":
             content += [body(state.summary), thin()]
         lines = [f"\u203a {clip(item.content, 150)}" for item in shown]
-        empty = "-# Aucun souvenir." if self.tab == "memories" else "-# Rien à valider."
+        empty = (
+            "*Aucun souvenir pour l'instant.*" if self.tab == "memories" else "*Rien à valider.*"
+        )
         content.append(body("\n".join(lines) if lines else empty))
         if total > 1:
             content.append(body(f"-# Page {self.page + 1}/{total}"))
@@ -109,7 +111,7 @@ class MemoryHub(Hub):
                 )
             )
         if shown:
-            options = [option(item.id, item.content) for item in shown]
+            options = [option(item.id, item.content, _when(item)) for item in shown]
             rows.append(discord.ui.ActionRow(Picker("Ouvrir…", options, self._open)))
         controls: list[discord.ui.Item] = []
         if not self.state.collective:
@@ -297,6 +299,12 @@ class _Correct(discord.ui.Modal, title="Modifier le souvenir"):
         await hub.act(
             interaction, lambda: store.correct(hub.actor, self.memory_id, text, now), "Modifié."
         )
+
+
+def _when(item: Memory | Proposal) -> str:
+    if isinstance(item, Proposal):
+        return f"proposé le {item.created_at:%d/%m/%Y}"
+    return f"retenu le {item.created_at:%d/%m/%Y}"
 
 
 async def open_memory(interaction: discord.Interaction, app: App, *, collective: bool) -> None:

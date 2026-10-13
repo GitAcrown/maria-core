@@ -69,4 +69,5 @@ def condition_text(condition: Mapping[str, Any] | None) -> str:
         "price_drop": f"baisse de {amount} %",
         "price_lower": "prix plus bas qu'au relevé précédent",
         "price_higher": "prix plus haut qu'au relevé précédent",
+        "page_changed": f"dès que ça change ({condition.get('text') or 'contenu principal'})",
     }.get(kind, str(condition.get("text") or ""))

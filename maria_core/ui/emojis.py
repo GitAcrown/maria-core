@@ -1,4 +1,8 @@
-"""Emojis custom de MARIA, repris de MARIA_R. Repli Unicode si le bot n'y a pas accès."""
+"""Toutes les icônes des vues de MARIA, au même endroit.
+
+Emojis custom (repris de MARIA_R, repli Unicode si le bot n'y a pas accès), puis les icônes
+Unicode des types de programme.
+"""
 
 FOOTBALL = "<:football:1517996110453670062>"
 FOOTBALL_PLAYER = "<:footballplayer:1517996109581258832>"
@@ -39,3 +43,16 @@ def downgrade(text: str, usable: frozenset[int] | None) -> str:
         if tag in text and emoji_id(tag) not in usable:
             text = text.replace(tag, plain)
     return text
+
+
+KIND_ICONS = {
+    "Rappel": "⏰",
+    "Rappel récurrent": "🔁",
+    "Écoute": "👂",
+    "Surveillance": "🔎",
+    "Veille de prix": "🏷️",
+    "Alerte vocale": "🔊",
+    "Alerte d'arrivée": "👋",
+    "Tâche programmée": "🗓️",
+    "Tâche": "🗓️",
+}
