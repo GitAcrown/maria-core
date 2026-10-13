@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable, Sequence
 
 import discord
 
-from maria_core.discord.layout import quiet_links
+from maria_core.discord.layout import emojis, quiet_links
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,10 @@ class Picker(discord.ui.Select):
 
 def title(text: str, meta: str = "") -> discord.ui.TextDisplay:
     """Titre `##` et ligne `-#` dans le même bloc."""
-    return discord.ui.TextDisplay(f"## {text}\n-# {meta}" if meta else f"## {text}")
+    head = emojis(text)
+    if not meta:
+        return discord.ui.TextDisplay(f"## {head}")
+    return discord.ui.TextDisplay(f"## {head}\n-# {emojis(meta)}")
 
 
 def body(text: str) -> discord.ui.TextDisplay:
@@ -146,11 +149,12 @@ def option(
     value: int | str, label: str, description: str = "", emoji: str = ""
 ) -> discord.SelectOption:
     shown = " ".join(label.split())[:100] or str(value)
+    mark = emojis(emoji) if emoji else ""
     return discord.SelectOption(
         label=shown,
         value=str(value),
         description=" ".join(description.split())[:100] or None,
-        emoji=emoji or None,
+        emoji=mark or None,
     )
 
 

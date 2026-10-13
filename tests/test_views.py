@@ -2,8 +2,19 @@ import discord
 
 from maria_core.capabilities.builtin.layout import card_from_spec, clip
 from maria_core.discord import layout
+from maria_core.ui import emojis as icons
 from maria_core.ui.emojis import FALLBACKS, FOOTBALL, MOVIE, downgrade, emoji_id
 from maria_core.ui.widgets import card, gallery, separator, text
+
+
+def test_every_custom_emoji_from_maria_r_has_a_fallback() -> None:
+    tags = [
+        value
+        for name, value in vars(icons).items()
+        if name.isupper() and isinstance(value, str) and value.startswith("<:")
+    ]
+    assert len(tags) == 23
+    assert set(tags) <= set(FALLBACKS)
 
 
 def test_custom_emojis_fall_back_to_unicode_only_when_missing() -> None:

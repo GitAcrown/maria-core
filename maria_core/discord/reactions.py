@@ -16,7 +16,8 @@ from maria_core.ui.emojis import FALLBACKS, TRANSCRIPT
 logger = logging.getLogger(__name__)
 
 _CUSTOM = re.compile(r"<a?:\w+:(\d+)>")
-_IGNORED = frozenset({TRANSCRIPT, FALLBACKS[TRANSCRIPT]})
+# Les emojis d'interface (et 📝, déclencheur de transcription) ne s'apprennent pas.
+_IGNORED = frozenset(FALLBACKS) | {FALLBACKS[TRANSCRIPT]}
 
 
 class ReactionCog(commands.Cog):

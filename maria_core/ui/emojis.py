@@ -1,9 +1,11 @@
 """Toutes les icônes des vues de MARIA, au même endroit.
 
-Emojis custom (repris de MARIA_R, repli Unicode si le bot n'y a pas accès), puis les icônes
-Unicode des types de programme.
+Emojis custom repris de MARIA_R (`common/emojis.py`). Si le bot n'y a pas accès,
+`downgrade` les remplace par le repli Unicode. Les types de programme sans emoji
+custom gardent une icône Unicode.
 """
 
+SETTINGS = "<:settings:1517996106854830213>"
 FOOTBALL = "<:football:1517996110453670062>"
 FOOTBALL_PLAYER = "<:footballplayer:1517996109581258832>"
 DIRECT = "<:direct:1517996113360064682>"
@@ -12,11 +14,23 @@ TV = "<:tv:1517996107748216893>"
 GAMES = "<:games:1517996105529561270>"
 MUSIC = "<:music:1533911299908698122>"
 YOUTUBE = "<:youtube1:1538993229331042345>"
+RESUME = "<:m_summary:1555564049260089364>"
 TRAIN = "<:train:1538180467856113695>"
+SMALL_WEB = "<:s_web:1537964754427977838>"
+SMALL_TASK = "<:m_reminder:1555563039829397648>"
+SMALL_BRAIN = "<:s_brain:1538131064709455912>"
+SMALL_POLL = "<:s_poll:1544480182000156754>"
+SMALL_CHART = "<:m_chart:1555563454394273923>"
+REPEAT_REMINDER = "<:m_small_loop:1555885612022898771>"
+EVENT_TASK = "<:event:1557881738456211527>"
 TRANSCRIPT = "<:transcript:1517996112001372303>"
 TRANSCRIPT_SUB = "<:m_small_trasncript:1555888662049456209>"
+BOOKMARK = "<:save:1539017570894610543>"
+SAVE_SMALL = "<:save_small:1539018471931641926>"
+PENCIL = "<:pencil:1539037226095353996>"
 
 FALLBACKS = {
+    SETTINGS: "⚙️",
     FOOTBALL: "⚽",
     FOOTBALL_PLAYER: "⚽",
     DIRECT: "🔴",
@@ -25,9 +39,20 @@ FALLBACKS = {
     GAMES: "🎮",
     MUSIC: "🎵",
     YOUTUBE: "▶️",
+    RESUME: "📋",
     TRAIN: "🚆",
+    SMALL_WEB: "🌐",
+    SMALL_TASK: "⏰",
+    SMALL_BRAIN: "🧠",
+    SMALL_POLL: "📊",
+    SMALL_CHART: "📈",
+    REPEAT_REMINDER: "🔁",
+    EVENT_TASK: "👂",
     TRANSCRIPT: "📝",
     TRANSCRIPT_SUB: "📝",
+    BOOKMARK: "🔖",
+    SAVE_SMALL: "🔖",
+    PENCIL: "✏️",
 }
 
 
@@ -46,13 +71,13 @@ def downgrade(text: str, usable: frozenset[int] | None) -> str:
 
 
 KIND_ICONS = {
-    "Rappel": "⏰",
-    "Rappel récurrent": "🔁",
-    "Écoute": "👂",
+    "Rappel": SMALL_TASK,
+    "Rappel récurrent": REPEAT_REMINDER,
+    "Écoute": EVENT_TASK,
     "Surveillance": "🔎",
     "Veille de prix": "🏷️",
     "Alerte vocale": "🔊",
     "Alerte d'arrivée": "👋",
-    "Tâche programmée": "🗓️",
-    "Tâche": "🗓️",
+    "Tâche programmée": REPEAT_REMINDER,
+    "Tâche": SMALL_TASK,
 }
