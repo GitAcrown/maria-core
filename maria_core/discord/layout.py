@@ -5,6 +5,7 @@ import re
 
 import discord
 
+from maria_core.ui.emojis import downgrade
 from maria_core.ui.widgets import Block, Card
 
 logger = logging.getLogger(__name__)
@@ -13,12 +14,22 @@ TEXT_BUDGET = 3800
 COMPONENT_BUDGET = 38
 _URL = re.compile(r"(?<![<(])(https?://[^\s<>)]+)")
 _MD_LINK = re.compile(r"\[([^\]]+)\]\((?!<)(https?://[^)\s]+)\)")
+_EMOJIS: dict[str, frozenset[int] | None] = {"usable": None}
+
+
+def use_emojis(ids: set[int] | frozenset[int]) -> None:
+    """Emojis custom accessibles au bot ; les autres passent en Unicode."""
+    _EMOJIS["usable"] = frozenset(ids)
+
+
+def emojis(text: str) -> str:
+    return downgrade(text, _EMOJIS["usable"])
 
 
 def quiet_links(text: str) -> str:
     """Liens sans aperçu Discord : `[texte](<url>)` et URLs nues entre <>."""
     value = _MD_LINK.sub(lambda match: f"[{match.group(1)}](<{match.group(2)}>)", text or "")
-    return _URL.sub(_bare, value)
+    return _URL.sub(_bare, emojis(value))
 
 
 def build_views(

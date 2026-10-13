@@ -11,12 +11,12 @@ from discord.ext import commands
 from maria_core.app import App
 from maria_core.conversation.model import ReplyMode
 from maria_core.social.service import ReactionSeen
-from maria_core.ui.emojis import TRANSCRIPT
+from maria_core.ui.emojis import FALLBACKS, TRANSCRIPT
 
 logger = logging.getLogger(__name__)
 
 _CUSTOM = re.compile(r"<a?:\w+:(\d+)>")
-_IGNORED = frozenset({TRANSCRIPT})
+_IGNORED = frozenset({TRANSCRIPT, FALLBACKS[TRANSCRIPT]})
 
 
 class ReactionCog(commands.Cog):

@@ -22,6 +22,7 @@ from maria_core.ui.widgets import (
 _MAX_ROWS = 25
 _MAX_COLUMNS = 6
 _CELL = 24
+_TEXT = 1900
 
 _WIDGET_TEXT = (
     "Compose une vue Discord sur mesure (blocs : text, separator, stat_row, thumbnail, gallery, "
@@ -31,10 +32,17 @@ _WIDGET_TEXT = (
     "ni un avis : là, réponds en texte. Le widget EST la réponse : ne le recopie pas autour. "
     "Plusieurs appels dans le même tour = plusieurs cartes dans un seul message. "
     "Images : seulement des URLs déjà fiables (résultat d'outil, avatar, lien du message). "
-    'Exemple : {"title":"PS5 vs Xbox","emoji":"🎮","accent":"#2b6cb0","blocks":['
-    '{"type":"stat_row","items":[{"label":"Prix","value":"499 €"}]},'
-    '{"type":"separator"},{"type":"text","content":"**PS5** : exclusivités."},'
-    '{"type":"footer","content":"Avis MARIA"}]}'
+    "Style : titre court, footer sourcé, pas de couleur sauf demande explicite. Exemples : "
+    '{"title":"PS5 vs Xbox Series X","emoji":"🎮","blocks":['
+    '{"type":"text","content":"**PS5** : exclusivités fortes, DualSense."},{"type":"separator"},'
+    '{"type":"text","content":"**Xbox Series X** : Game Pass, rétrocompatibilité."},'
+    '{"type":"footer","content":"Avis MARIA"}]} ; '
+    '{"title":"Pâtes carbonara","emoji":"🍝","blocks":['
+    '{"type":"stat_row","items":[{"label":"Temps","value":"25 min"},'
+    '{"label":"Pers.","value":"2"}]},'
+    '{"type":"text","content":"**Ingrédients**\\n• 200 g spaghetti\\n• 100 g guanciale"},'
+    '{"type":"text","content":"**Étapes**\\n1. Dorer le guanciale.\\n2. Lier hors du feu."},'
+    '{"type":"footer","content":"Recette classique"}]}'
 )
 _TABLE_TEXT = (
     "Affiche un tableau aligné (bloc de code) dans le salon. Dès qu'une réponse mérite un "
@@ -103,6 +111,7 @@ def card_from_spec(spec: Mapping[str, Any]) -> Card:
     title = str(spec.get("title") or "").strip()
     if title:
         blocks.append(heading(title, emoji=str(spec.get("emoji") or "").strip()))
+        blocks.append(separator())
     for raw in spec.get("blocks") or []:
         if isinstance(raw, Mapping):
             blocks.append(_block(raw))
@@ -111,7 +120,7 @@ def card_from_spec(spec: Mapping[str, Any]) -> Card:
 
 def _block(raw: Mapping[str, Any]) -> Block | None:
     kind = str(raw.get("type") or "")
-    content = str(raw.get("content") or "")
+    content = clip(str(raw.get("content") or ""), _TEXT)
     if kind == "text":
         return text(content)
     if kind == "separator":
@@ -127,6 +136,18 @@ def _block(raw: Mapping[str, Any]) -> Block | None:
     if kind == "links":
         return links([(str(i.get("label") or ""), str(i.get("url") or "")) for i in _dicts(raw)])
     return None
+
+
+def clip(value: str, limit: int) -> str:
+    """Coupe sans trancher un mot : dernier saut de ligne, fin de phrase ou espace."""
+    value = value.strip()
+    if len(value) <= limit:
+        return value
+    cut = value[:limit]
+    boundary = max(cut.rfind("\n"), cut.rfind(". "))
+    if boundary < limit * 0.6:
+        boundary = cut.rfind(" ")
+    return cut[: boundary if boundary > 0 else limit].rstrip(" .,;:—-") + "…"
 
 
 def _dicts(raw: Mapping[str, Any]) -> list[Mapping[str, Any]]:
