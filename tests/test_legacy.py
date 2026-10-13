@@ -1,13 +1,16 @@
 """Import MARIA_R : le rapport précède l'écriture, la source reste intacte."""
 
 import json
+import shutil
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
 from maria_core.db import Database
+from maria_core.db.database import DEFAULT_MIGRATIONS
 from maria_core.legacy import apply, render, scan
 from maria_core.legacy.__main__ import main
+from maria_core.objectives.store import ObjectiveStore
 
 _NOW = datetime(2026, 10, 11, 18, 0, tzinfo=UTC)
 
@@ -475,3 +478,36 @@ def _kv(path: Path, table: str, pairs: dict[str, str]) -> None:
     connection.executemany(f"INSERT INTO {table} VALUES (?, ?)", list(pairs.items()))
     connection.commit()
     connection.close()
+
+
+def test_imported_reminders_become_reports_so_the_instruction_runs(tmp_path: Path) -> None:
+    older = tmp_path / "migrations"
+    older.mkdir()
+    for path in sorted(DEFAULT_MIGRATIONS.glob("*.sql")):
+        if not path.name.startswith("012"):
+            shutil.copy(path, older / path.name)
+    database = Database(tmp_path / "maria.db", migrations_dir=older)
+    database.migrate()
+    store = ObjectiveStore(database)
+    moment = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
+    rows = [
+        store.create(
+            owner_id=7,
+            guild_id=5,
+            channel_ids=(3,),
+            deliver="channel",
+            title=f"Décompte {index}",
+            trigger={"type": "daily", "time": f"1{index}:00"},
+            condition=None,
+            action={"type": "remind", "text": "Donne le nombre de jours avant Halloween."},
+            now=moment,
+        )[0]
+        for index in range(2)
+    ]
+    database.execute("INSERT INTO legacy_map VALUES ('task', '42', 'objectives', ?)", (rows[0].id,))
+    database.close()
+    upgraded = Database(tmp_path / "maria.db")
+    upgraded.migrate()
+    kinds = [ObjectiveStore(upgraded).get(row.id).action["type"] for row in rows]
+    assert kinds == ["report", "remind"]
+    upgraded.close()
