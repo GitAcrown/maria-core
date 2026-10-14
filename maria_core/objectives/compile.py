@@ -138,15 +138,16 @@ _KIND = re.compile(
     r"\s+(?:(?:de|du|des|d')\s*)?",
     re.IGNORECASE,
 )
-_ARTICLE = re.compile(r"^(?:(?:le|la|les)\s+|l')", re.IGNORECASE)
 
 
 def clean_pattern(raw: str) -> str:
-    """« le film « Le Corset » » devient « corset » : seul le nom distinctif est guetté."""
+    """« le film « Le Corset » » devient « Le Corset » : le nom comme on le dit, article compris.
+
+    « corset » seul ne doit pas suffire : « le corset » est un film, « un corset » n'en est pas un.
+    """
     text = " ".join(str(raw).translate(_QUOTES).split())
-    text = _KIND.sub("", text, count=1).strip()
-    bare = _ARTICLE.sub("", text, count=1).strip()
-    return bare if len(bare) >= 3 else text
+    stripped = _KIND.sub("", text, count=1).strip()
+    return stripped if len(stripped) >= 3 else text
 
 
 def _topic(args: Mapping[str, Any], _now: datetime | None) -> dict[str, Any]:

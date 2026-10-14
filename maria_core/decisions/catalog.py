@@ -68,8 +68,9 @@ def builtin_decisions() -> tuple[Decision, ...]:
             ttl=30,
             rules=listen_rules,
             instructions=(
-                "`message` contains the keyword `pattern`. "
-                "fire only if it really matches the watcher's intent."
+                "`message` contains the phrase `pattern`, the exact name of a title, person or "
+                "thing someone asked to be warned about. fire only if the message really refers "
+                "to that thing, not to the same words used in another sense."
             ),
             criteria={
                 "fire": "Genuinely about the watched topic",
