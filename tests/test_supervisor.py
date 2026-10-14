@@ -4,7 +4,7 @@ import sys
 import threading
 from collections.abc import Mapping, Sequence
 
-from maria_core.supervisor import CHILD_ENV, RESTARTS_ENV, Backoff, supervise
+from maria_core.supervisor import CHILD_ENV, RESTARTS_ENV, Backoff, _duration, supervise
 
 
 class _Child:
@@ -53,7 +53,17 @@ class _Clock:
 
 def test_the_wait_doubles_and_is_capped() -> None:
     plan = Backoff()
-    assert [plan.delay(n) for n in range(1, 10)] == [5, 10, 20, 40, 80, 160, 320, 640, 900]
+    assert [plan.delay(n) for n in range(1, 10)] == [
+        10,
+        30,
+        90,
+        270,
+        810,
+        2430,
+        7290,
+        21600,
+        21600,
+    ]
     assert Backoff(first=1, factor=3, cap=20).delay(4) == 20
 
 
@@ -81,7 +91,7 @@ def test_a_crash_is_restarted_with_a_growing_wait_until_a_clean_stop() -> None:
         environ={"TOKEN": "x"},
     )
     assert code == 0 and not launcher.codes
-    assert stop.waits == [5, 10, 20]
+    assert stop.waits == [10, 30, 90]
     assert [env[RESTARTS_ENV] for env in launcher.environments] == ["0", "1", "2", "3"]
     assert all(env[CHILD_ENV] == "1" and env["TOKEN"] == "x" for env in launcher.environments)
 
@@ -96,9 +106,9 @@ def test_a_wrong_configuration_or_a_clean_stop_is_never_retried() -> None:
 def test_a_long_run_starts_the_wait_over() -> None:
     launcher = _Launcher([1, 1, 1, 1, 0])
     stop = _Pauses()
-    clock = _Clock([5, 5, 700, 5])  # le troisième fils a tenu 700 s : on repart de 5 s
+    clock = _Clock([5, 5, 700, 5])  # le troisième fils a tenu 700 s : on repart de 10 s
     supervise(["x"], spawn=launcher, stop=stop, clock=clock, say=lambda _line: None)
-    assert stop.waits == [5, 10, 5, 10]
+    assert stop.waits == [10, 30, 10, 30]
 
 
 def test_a_stop_request_ends_everything_without_another_attempt() -> None:
@@ -120,4 +130,27 @@ def test_a_real_process_is_restarted_then_left_alone() -> None:
         backoff=Backoff(first=0.01, cap=0.02),
         say=said.append,
     )
-    assert code == 0 and len(said) == 1 and "n°1" in said[0]
+    assert code == 0 and len(said) == 1 and "tentative 1/8" in said[0]
+
+
+def test_a_major_bug_ends_in_abandon_after_the_allowed_attempts() -> None:
+    launcher = _Launcher([1] * 20)
+    stop = _Pauses()
+    said: list[str] = []
+    code = supervise(["x"], spawn=launcher, stop=stop, clock=_Clock([2] * 20), say=said.append)
+    assert code == 1
+    assert len(stop.waits) == 8 and stop.waits[-1] == 21600
+    assert len(launcher.codes) == 20 - 9  # 1 lancement + 8 relances, puis plus rien
+    assert "abandon" in said[-1] and "8 fois de suite" in said[-1]
+    assert "Nouvelle tentative 8/8 dans 6 h" in said[-2]
+
+
+def test_waits_are_written_in_human_units() -> None:
+    assert [_duration(s) for s in (10, 90, 270, 810, 7290, 21600)] == [
+        "10 s",
+        "90 s",
+        "4 min",
+        "14 min",
+        "2 h",
+        "6 h",
+    ]
