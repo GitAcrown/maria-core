@@ -2,6 +2,7 @@ import discord
 
 from maria_core.capabilities.builtin.layout import card_from_spec, clip, render_draft
 from maria_core.discord import layout
+from maria_core.discord.voice import TRANSCRIPT_LABEL, transcript_footer
 from maria_core.ui import emojis as icons
 from maria_core.ui.emojis import FALLBACKS, FOOTBALL, MOVIE, downgrade, emoji_id
 from maria_core.ui.widgets import card, gallery, separator, text
@@ -78,3 +79,8 @@ def test_a_draft_is_a_small_card_under_the_comment_with_a_line_between() -> None
     assert "**Message** · Quelqu'un parle du film Le Corset" in inside[0].content
     assert inside[1].content == "-# Écoute · brouillon n°14 · réponds « oui » ou « non »"
     assert not any(isinstance(item, discord.ui.Button) for item in views[0].walk_children())
+
+
+def test_a_requested_transcript_says_who_asked() -> None:
+    assert transcript_footer() == TRANSCRIPT_LABEL
+    assert transcript_footer("Léa") == f"{TRANSCRIPT_LABEL} · demandé par Léa"
