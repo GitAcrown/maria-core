@@ -11,6 +11,7 @@ from maria_core.app import App
 from maria_core.capabilities.builtin.python_tool import set_python
 from maria_core.conversation.policy import (
     save_everyone,
+    save_limit,
     save_mode,
     save_transcribe,
 )
@@ -31,6 +32,12 @@ _LEARNING = [
     app_commands.Choice(name="Elle me demande avant de retenir", value="ask"),
     app_commands.Choice(name="Elle ne retient rien sur moi", value="off"),
 ]
+_LIMITS = [
+    app_commands.Choice(name="Aucune — MARIA répond toujours (défaut)", value="none"),
+    app_commands.Choice(name="Modérée — pas plus de réponses que de messages", value="normal"),
+    app_commands.Choice(name="Stricte — deux fois moins de réponses", value="strict"),
+]
+_LIMIT_NAMES = {"none": "aucune", "normal": "modérée", "strict": "stricte"}
 _LEVELS = [
     app_commands.Choice(name="Off — aucune réaction spontanée", value="off"),
     app_commands.Choice(name="Discret", value="quiet"),
@@ -128,6 +135,25 @@ class PublicCommands(commands.Cog):
         await asyncio.to_thread(set_python, _app(self.bot).database, guild.id, actif, _stamp())
         state = "activé" if actif else "désactivé"
         await answer(interaction, "run_python", f"**{state.capitalize()}** sur ce serveur.")
+
+    @chatbot.command(name="limite", description="Limiter les réponses de MARIA sur ce serveur")
+    @app_commands.choices(niveau=_LIMITS)
+    async def limit(
+        self, interaction: discord.Interaction, niveau: app_commands.Choice[str]
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await refuse(interaction, "Disponible sur un serveur.")
+            return
+        await asyncio.to_thread(
+            save_limit, _app(self.bot).database, guild.id, niveau.value, _stamp()
+        )
+        await answer(
+            interaction,
+            "Limite de réponses",
+            f"**{niveau.name}**",
+            meta="Les suivis sans appel restent toujours un peu plus discrets",
+        )
 
     @chatbot.command(name="spontaneite", description="Réactions spontanées de MARIA")
     @app_commands.choices(niveau=_LEVELS)
@@ -229,7 +255,7 @@ _MODES_TEXT = {
 def _snapshot(app: App, guild_id: int, channel_id: int) -> tuple[str, str]:
     guild = app.database.fetchone(
         """
-        SELECT mode, spontaneity, python_blocked
+        SELECT mode, spontaneity, python_blocked, reply_limit
         FROM guild_settings WHERE guild_id = ?
         """,
         (guild_id,),
@@ -243,6 +269,7 @@ def _snapshot(app: App, guild_id: int, channel_id: int) -> tuple[str, str]:
     )
     mode = "strict" if guild is None else str(guild["mode"] or "strict")
     spontaneity = "normal" if guild is None else str(guild["spontaneity"] or "normal")
+    limit = "aucune" if guild is None else _LIMIT_NAMES.get(str(guild["reply_limit"]), "aucune")
     flags = [
         ("@everyone", channel is not None and bool(channel["respond_everyone"])),
         ("Vocaux transcrits", channel is not None and bool(channel["auto_transcribe"])),
@@ -257,6 +284,7 @@ def _snapshot(app: App, guild_id: int, channel_id: int) -> tuple[str, str]:
         f"`{'█' * filled}{'░' * (20 - filled)}` {share} %",
         "",
         f"**Spontanéité** · {spontaneity}",
+        f"**Limite de réponses** · {limit}",
         " · ".join(f"{label} {'✅' if on else '❌'}" for label, on in flags),
         f"-# {len(app.capabilities.names())} outils disponibles",
     ]

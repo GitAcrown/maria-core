@@ -30,6 +30,7 @@ python -m maria_core --env-file .env
 ## Ce que fait MARIA
 
 - **Conversation** : mention, réponse à un de ses messages, `@everyone` si le salon l'autorise, son prénom (et en mode greedy, son prénom au milieu d'une phrase). Elle voit les citations de reply, les embeds, les messages transférés, les images. Un message privé ne lance pas de conversation : il ne sert qu'à recevoir un rappel ou une veille.
+- **Aucune limite sur les membres** : MARIA répond chaque fois qu'on l'appelle. Un modérateur peut en poser une pour tout un serveur (`/chatbot limite` : modérée ou stricte). Seuls les suivis, quand elle reprend la parole sans qu'on l'appelle, sont toujours un peu bridés.
 - **Silence choisi** : quand on ne lui pose pas de vraie question, elle peut se contenter d'un emoji. « Réagis à mon message » pose une réaction.
 - **Vocaux** : transcription automatique si le salon l'a activée, ou quand on parle à MARIA ; sinon la réaction de transcription (emoji de MARIA, ou 📝 si le bot n'y a pas accès) transcrit à la demande. La transcription est postée en citation.
 - **Images à la demande** : graphiques (barres, courbes, camembert…), diagrammes (organigramme, séquence, planning, carte mentale, Graphviz, PlantUML), QR codes, formules mathématiques et tracé de fonctions. Rien n'est dessiné sur le serveur : des services gratuits sans clé s'en chargent (QuickChart, mermaid.ink, Kroki, CodeCogs), ce qui veut dire que le contenu du graphique ou du diagramme leur est envoyé. Un diagramme refusé par le service est corrigé et renvoyé.
@@ -53,7 +54,7 @@ Slash (après `5!sync`) :
 | `/profil` | Ce que MARIA sait de toi (ville, équipe, arrêt) et comment elle te parle : tout se voit et se change |
 | `/programmes` | Rappels, écoutes et surveillances : modifier, pause, reprise, saut, confirmation, suppression, tout supprimer |
 | `/info` | Réglages du salon et outils disponibles |
-| `/chatbot mode\|forget\|everyone\|autotranscribe\|python\|spontaneite` | Réglages, modérateurs |
+| `/chatbot mode\|forget\|everyone\|autotranscribe\|python\|spontaneite\|limite` | Réglages, modérateurs |
 | `/preferences apprentissage\|reactions` | Réglages personnels |
 
 Préfixe (`5!` par défaut) : `spontaneite`. Propriétaire : `why <lien>`, `status`, `usage [jours]`, `keys`, `presence`, `plugin load|unload|reload`, `sync`, `update`, `restart`, `shutdown`.

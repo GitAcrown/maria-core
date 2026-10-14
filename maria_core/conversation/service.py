@@ -123,11 +123,12 @@ class ConversationService:
             self._history(message.channel_id).add(user_entry(message, addressed=True))
             return None
         route = await self._resolve(message, policy)
-        if route.action is Action.RESPOND and not self._admits(message):
+        if route.action is Action.RESPOND and not self._admits(message, route, policy):
             seen = self._social.room if self._social is not None else None
             logger.info(
-                "Adresse ignorée, frein anti-rafale pour %s : %s message(s) de lui et %s dans le "
-                "salon sur 10 min, trop de réponses déjà données",
+                "Réponse retenue (%s) pour %s : %s message(s) de lui et %s dans le salon sur "
+                "10 min, trop de réponses déjà données",
+                "suivi" if route.reason == "followup" else f"limite {policy.limit}",
                 message.author_id,
                 seen.from_author(message.channel_id, message.author_id) if seen else 0,
                 seen.volume(message.channel_id) if seen else 0,
@@ -207,7 +208,7 @@ class ConversationService:
             return None
         addressed = route.action is Action.RESPOND
         history.replace(message.message_id, user_entry(message, addressed=addressed))
-        if not addressed or not self._admits(message):
+        if not addressed or not self._admits(message, route, policy):
             return None
         return await self._answer(message, policy, route, thinking)
 
@@ -232,14 +233,17 @@ class ConversationService:
             return True
         return False
 
-    def _admits(self, message: Inbound) -> bool:
+    def _admits(self, message: Inbound, route: Route, policy: Policy) -> bool:
         if self._social is None:
             return True
-        return self._pressure.allow(
+        room = self._social.room
+        return self._pressure.admit(
             message.author_id,
             message.channel_id,
-            author_pace=self._social.room.from_author(message.channel_id, message.author_id),
-            channel_pace=self._social.room.volume(message.channel_id),
+            author_messages=room.from_author(message.channel_id, message.author_id),
+            channel_messages=room.volume(message.channel_id),
+            limit=policy.limit,
+            followup=route.reason == "followup",
         )
 
     async def _resolve(self, message: Inbound, policy: Policy) -> Route:
