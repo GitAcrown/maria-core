@@ -10,7 +10,7 @@ from maria_core.objectives.compile import (
     compile_action,
     compile_condition,
     compile_trigger,
-    is_conditional,
+    needs_confirmation,
 )
 from maria_core.objectives.labels import condition_text, kind_label, op_label
 from maria_core.objectives.model import Objective, ObjectiveQuota, StaleObjective
@@ -79,6 +79,7 @@ def _build(service: Any, context: Context, args: Mapping[str, Any]) -> tuple[Obj
     check_plan(trigger, condition, action)
     deliver = "dm" if context.guild_id is None else str(args.get("deliver") or "channel")
     repeat = bool(trigger.get("repeat"))
+    limit = _max_fires(trigger, args, repeat)
     return service.store.create(
         owner_id=context.user_id,
         guild_id=context.guild_id,
@@ -91,9 +92,9 @@ def _build(service: Any, context: Context, args: Mapping[str, Any]) -> tuple[Obj
         condition=condition,
         action=action,
         now=now,
-        max_fires=_max_fires(trigger, args, repeat),
+        max_fires=limit,
         cooldown_s=_REPEAT_COOLDOWN if repeat and trigger["type"] in EVENT_TRIGGERS else 0,
-        status="draft" if is_conditional(trigger, condition, action) else "active",
+        status="draft" if needs_confirmation(trigger, action, limit) else "active",
         origin_message_id=context.message_id,
         state={"spec": _spec(args)},
     )

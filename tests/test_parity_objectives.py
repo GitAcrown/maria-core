@@ -108,7 +108,9 @@ def test_plans_that_would_spam_are_refused() -> None:
         check_plan({"type": "interval", "every_s": 600}, None, {"type": "fetch_then"})
 
 
-async def test_a_listening_objective_is_a_draft_that_fires_once(tmp_path: Path) -> None:
+async def test_a_one_shot_listening_objective_is_active_at_once_and_fires_once(
+    tmp_path: Path,
+) -> None:
     clock = [_NOW]
     service, database, courier = _open(tmp_path, clock)
     data = await _create(
@@ -120,15 +122,11 @@ async def test_a_listening_objective_is_a_draft_that_fires_once(tmp_path: Path) 
         action_type="alert",
         text="ça parle de ranked",
     )
-    assert data["status"] == "draft"
+    assert data["status"] == "active"
     assert data["max_fires"] == 1
     signal = ObjectiveSignal(
         kind="message", key="message:1", channel_id=3, guild_id=5, user_id=8, text="une classé ?"
     )
-    assert await service.matcher.handle(signal, now=clock[0]) == 0
-    drafts = Drafts(service, _Engine("accept"))
-    answered = await drafts.answer(_inbound("oui vas-y"))
-    assert answered is True
     assert await service.matcher.handle(signal, now=clock[0]) == 1
     second = ObjectiveSignal(
         kind="message", key="message:2", channel_id=3, guild_id=5, user_id=8, text="classé"
@@ -327,6 +325,7 @@ async def test_a_draft_is_still_confirmed_by_a_plain_message_hours_later(tmp_pat
         pattern="le film « Le corset »",
         action_type="alert",
         text="Quelqu'un parle du film Le Corset",
+        repeat=True,
     )
     assert data["status"] == "draft"
     clock[0] = _NOW + timedelta(hours=2)
@@ -347,6 +346,7 @@ async def test_a_forgotten_draft_stops_listening_after_a_while(tmp_path: Path) -
         pattern="ranked",
         action_type="alert",
         text="ça parle de ranked",
+        repeat=True,
     )
     clock[0] = _NOW + timedelta(hours=5)
     assert await Drafts(service, _Engine("accept")).answer(_inbound("oui")) is False
@@ -380,4 +380,38 @@ async def test_the_alert_names_who_spoke_not_who_asked(tmp_path: Path) -> None:
     assert courier.sent[0].text == (
         "Quelqu'un parle du film Le Corset\n> **Léa** : Le corset est un film sur la scoliose"
     )
+    database.close()
+
+
+async def test_only_what_can_become_a_chore_asks_for_a_yes(tmp_path: Path) -> None:
+    clock = [_NOW]
+    service, database, _courier = _open(tmp_path, clock)
+    once = {
+        "trigger_type": "at",
+        "in_minutes": 10,
+        "action_type": "remind",
+        "text": "Sors le chien",
+    }
+    assert (await _create(service, tmp_path, title="Chien", **once))["status"] == "active"
+    listen = {"trigger_type": "on_topic", "pattern": "ranked", "action_type": "alert"}
+    assert (await _create(service, tmp_path, title="Ranked", text="x", **listen))[
+        "status"
+    ] == "active"
+    daily = {"trigger_type": "daily", "time": "08:00", "action_type": "remind"}
+    assert (await _create(service, tmp_path, title="Eau", text="Bois", **daily))[
+        "status"
+    ] == "draft"
+    again = {**listen, "pattern": "tournoi", "repeat": True}
+    assert (await _create(service, tmp_path, title="Tournoi", text="x", **again))[
+        "status"
+    ] == "draft"
+    watch = {
+        "trigger_type": "interval",
+        "every_minutes": 720,
+        "action_type": "fetch_then",
+        "url": "https://shop.test/p",
+        "condition_type": "price_below",
+        "threshold": 50,
+    }
+    assert (await _create(service, tmp_path, title="Prix", text="x", **watch))["status"] == "draft"
     database.close()

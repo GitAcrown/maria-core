@@ -48,7 +48,11 @@ GUIDE = (
     "son nom. Pour une écoute, c'est quelqu'un d'autre qui parlera : « Quelqu'un parle du film Le "
     "Corset » (le message est cité dessous). Pour un rappel : « Tu devais sortir le chien ».\n"
     "- N'invente ni nombre d'alertes ni durée, ne demande pas « combien de fois ». "
-    "Un brouillon part après un oui : objective_update op=confirm. Ajustement : op=modify."
+    "Confirmation au cas par cas : un rappel isolé ou une écoute unique (« ping-moi si on "
+    "parle de X ») est actif tout de suite, dis simplement que c'est fait. Ce qui se répète "
+    "(daily, weekly, interval, repeat=true) et les veilles de page ou de prix sont des "
+    "brouillons : explique en une phrase, ils partent après un oui (objective_update "
+    "op=confirm). Ajustement : op=modify."
 )
 
 
