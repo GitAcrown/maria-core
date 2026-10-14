@@ -1,9 +1,19 @@
 """Démarre le processus. `python -m maria_core` ou la commande `maria`."""
 
+import os
+import sys
+
+if not __package__:
+    # Lancé comme un fichier (`python maria_core` ou `python maria_core/__main__.py`) : Python met
+    # alors ce dossier en tête de sys.path, et nos modules (discord, profile…) masqueraient la
+    # bibliothèque standard et discord.py. On l'écarte et on prend le dossier du projet.
+    _HERE = os.path.dirname(os.path.abspath(__file__))
+    sys.path[:] = [item for item in sys.path if os.path.abspath(item or os.curdir) != _HERE]
+    sys.path.insert(0, os.path.dirname(_HERE))
+
 import argparse
 import asyncio
 import logging
-import sys
 from pathlib import Path
 
 from maria_core import __version__
@@ -11,7 +21,7 @@ from maria_core.app import App
 from maria_core.config import Settings
 from maria_core.discord.bot import MariaBot
 from maria_core.errors import ConfigError, MariaError
-from maria_core.logging import configure_logging
+from maria_core.journal import configure_logging
 
 logger = logging.getLogger(__name__)
 

@@ -2,12 +2,12 @@
 
 MARIA est un bot Discord. Elle discute dans les salons, réagit selon l'activité du serveur, retient ce qu'on lui demande de retenir, et envoie des rappels, des récaps et des veilles. Un seul processus, une base SQLite, des extensions pour la météo, le foot, les films, la musique, les jeux, YouTube et les transports.
 
-Python 3.13 ou plus récent.
+Python 3.12 ou plus récent.
 
 ## Installation
 
 ```bash
-python3.13 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e . --no-deps
