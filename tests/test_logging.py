@@ -2,7 +2,7 @@
 
 import logging
 
-from maria_core.logging import KeyValueFormatter
+from maria_core.journal import KeyValueFormatter
 
 
 def test_formatter_quotes_spaces_and_keeps_the_keys() -> None:
