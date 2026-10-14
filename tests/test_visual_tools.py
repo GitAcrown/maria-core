@@ -2,18 +2,15 @@
 
 import base64
 import json
-import random
 import urllib.parse
 import zlib
-from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
 from maria_core.capabilities import CapabilityRegistry, Context
-from maria_core.capabilities.builtin import fun
 from maria_core.capabilities.builtin.formula import compile_formula
-from maria_core.capabilities.builtin.fun import fun_capabilities, render_clock
+from maria_core.capabilities.builtin.plots import plot_capability
 from maria_core.capabilities.builtin.visuals import (
     chart_config,
     diagram_url,
@@ -43,7 +40,7 @@ def _png(_method: str, _url: str, _headers: Any, _body: Any) -> HttpResponse:
 
 def _registry(http: FakeHttp) -> CapabilityRegistry:
     registry = CapabilityRegistry()
-    for capability in (*visual_capabilities(http), *fun_capabilities(http)):
+    for capability in (*visual_capabilities(http), plot_capability(http)):
         registry.register(capability)
     return registry
 
@@ -54,7 +51,7 @@ async def _run(registry: CapabilityRegistry, name: str, **arguments: Any):
 
 def test_every_new_tool_has_a_valid_strict_schema() -> None:
     http = FakeHttp(_png)
-    for capability in (*visual_capabilities(http), *fun_capabilities(http)):
+    for capability in (*visual_capabilities(http), plot_capability(http)):
         schema = openai_tool(capability)["function"]["parameters"]
         assert schema["additionalProperties"] is False
         assert set(schema["required"]) == set(schema["properties"])
@@ -146,47 +143,6 @@ async def test_an_unreachable_service_is_reported_not_shown() -> None:
 
     result = await _run(_registry(FakeHttp(refuse)), "render_qr", text="salut")
     assert not result.ok and "503" in result.error
-
-
-async def test_dice_coins_picks_and_numbers(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(fun, "_RNG", random.Random(7))
-    registry = _registry(FakeHttp(_png))
-    dice = await _run(registry, "random_pick", kind="dice", notation="3d6+2")
-    assert len(dice.data["rolls"]) == 3 and dice.data["total"] == sum(dice.data["rolls"]) + 2
-    assert not (await _run(registry, "random_pick", kind="dice", notation="n'importe quoi")).ok
-    assert not (await _run(registry, "random_pick", kind="dice", notation="500d6")).ok
-    coin = await _run(registry, "random_pick", kind="coin", count=3)
-    assert len(coin.data["results"]) == 3 and set(coin.data["results"]) <= {"pile", "face"}
-    pick = await _run(registry, "random_pick", kind="pick", options=["a", "b", "c"], count=2)
-    assert len(set(pick.data["chosen"])) == 2
-    assert not (await _run(registry, "random_pick", kind="pick", options=["seul"])).ok
-    number = await _run(registry, "random_pick", kind="number", low=5, high=9)
-    assert 5 <= number.data["number"] <= 9
-
-
-async def test_time_zones_follow_daylight_saving() -> None:
-    registry = _registry(FakeHttp(_png))
-    summer = await _run(
-        registry,
-        "convert_time",
-        from_zone="Europe/Paris",
-        at="18:30",
-        date="2026-07-14",
-        to_zones=["America/New_York", "Asia/Tokyo"],
-    )
-    rows = {row["zone"]: row for row in summer.data["rows"]}
-    assert rows["America/New_York"]["time"] == "12:30"
-    assert rows["America/New_York"]["offset"] == "UTC-4"
-    assert rows["Asia/Tokyo"]["time"] == "01:30" and "15/07" in rows["Asia/Tokyo"]["day"]
-    winter = await _run(
-        registry, "convert_time", at="18:30", date="2026-12-14", to_zones=["America/New_York"]
-    )
-    assert winter.data["rows"][0]["time"] == "12:30"
-    assert not (await _run(registry, "convert_time", to_zones=["Mars/Olympus"])).ok
-    assert not (await _run(registry, "convert_time", at="25:99", to_zones=["Asia/Tokyo"])).ok
-    card = render_clock(summer.data).cards[0]
-    assert "**New York** · 12:30" in card.blocks[2].text
-    assert datetime.now(UTC).year >= 2026
 
 
 def test_formulas_are_computed_without_eval_and_dangerous_ones_are_refused() -> None:
