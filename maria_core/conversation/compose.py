@@ -40,6 +40,7 @@ _LABELS = {
     "read_web_page": ("Lecture", "url"),
     "remember_fact": ("Retenu", "content"),
     "forget_fact": ("Oublié", ""),
+    "profile_set": ("Profil mis à jour", ""),
 }
 _NOTE_CHARS = 360
 _MERGED_IMAGES = 4
@@ -154,8 +155,7 @@ def _label(record: ToolRecord) -> str:
         return _objective_label(record)
     title, field = _LABELS.get(record.name, ("", ""))
     if not title:
-        words = [word.capitalize() for word in record.name.split("_") if word]
-        return f"**{' '.join(words[:2]) or 'Outil'}**"
+        return ""  # un outil sans libellé français reste discret : jamais son nom technique
     detail = _clip(str(record.arguments.get(field) or "")) if field else ""
     if field == "url":
         return f"**{title}** · {_domain(str(record.arguments.get(field) or ''))}"

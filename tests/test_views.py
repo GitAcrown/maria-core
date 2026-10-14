@@ -1,11 +1,14 @@
 import discord
 
+from maria_core.capabilities import Result
 from maria_core.capabilities.builtin.layout import card_from_spec, clip, render_draft
+from maria_core.conversation.compose import compose
 from maria_core.discord import layout
 from maria_core.discord.voice import TRANSCRIPT_LABEL, transcript_footer
+from maria_core.llm.loop import LoopResult, ToolRecord
 from maria_core.ui import emojis as icons
 from maria_core.ui.emojis import FALLBACKS, FOOTBALL, MOVIE, downgrade, emoji_id
-from maria_core.ui.widgets import card, gallery, separator, text
+from maria_core.ui.widgets import WidgetRegistry, card, gallery, separator, text
 
 
 def test_every_custom_emoji_from_maria_r_has_a_fallback() -> None:
@@ -84,3 +87,18 @@ def test_a_draft_is_a_small_card_under_the_comment_with_a_line_between() -> None
 def test_a_requested_transcript_says_who_asked() -> None:
     assert transcript_footer() == TRANSCRIPT_LABEL
     assert transcript_footer("Léa") == f"{TRANSCRIPT_LABEL} · demandé par Léa"
+
+
+def test_tool_names_never_leak_into_the_footer() -> None:
+    def footer_of(name: str, **arguments: object) -> str:
+        record = ToolRecord(name, arguments, Result(ok=True, data={}))
+        outcome = LoopResult("Voilà", (name,), 1, 0, 0, "m", 0, True, records=(record,))
+        return compose(outcome, WidgetRegistry(), ("maria",)).footer
+
+    for silent in ("render_chart", "render_diagram", "render_qr", "render_math", "plot_function"):
+        assert footer_of(silent) == "", silent
+    assert footer_of("outil_inconnu_en_anglais") == ""
+    assert footer_of("profile_set") == "-# **Profil mis à jour**"
+    assert footer_of("remember_fact", content="je suis végétarien") == (
+        "-# **Retenu** · « je suis végétarien »"
+    )
