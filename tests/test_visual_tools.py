@@ -122,7 +122,7 @@ def test_diagram_addresses_are_built_for_each_service_and_capped() -> None:
         diagram_url("d2", "a -> b")
 
 
-async def test_qr_math_and_avatar_urls_are_verified() -> None:
+async def test_qr_and_math_urls_are_verified() -> None:
     http = FakeHttp(_png)
     registry = _registry(http)
     qr = await _run(registry, "render_qr", text="https://exemple.fr/a b")
@@ -130,10 +130,6 @@ async def test_qr_math_and_avatar_urls_are_verified() -> None:
     math_ = await _run(registry, "render_math", latex="\\frac{a}{b}")
     assert math_.ok
     assert urllib.parse.unquote(math_.data["url"]).endswith("\\dpi{220}\\bg{white} \\frac{a}{b}")
-    avatar = await _run(registry, "render_avatar", seed="Léa", style="pixel-art")
-    assert avatar.ok and "/9.x/pixel-art/png?seed=L%C3%A9a" in avatar.data["url"]
-    bad = await _run(registry, "render_avatar", seed="x", style="inconnu")
-    assert not bad.ok
     assert (await _run(registry, "render_qr", text="x" * 600)).ok is False
 
 

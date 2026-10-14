@@ -1,4 +1,4 @@
-"""Graphiques, diagrammes, QR codes, formules et avatars, dessinés par des services gratuits.
+"""Graphiques, diagrammes, QR codes et formules, dessinés par des services gratuits.
 
 Rien n'est dessiné sur le serveur : on décrit, un service rend l'image, Discord l'affiche depuis
 son adresse. Chaque adresse est vérifiée avant d'être montrée : un service qui refuse (diagramme
@@ -21,7 +21,6 @@ QUICKCHART = "https://quickchart.io"
 _MERMAID = "https://mermaid.ink/img/"
 _KROKI = "https://kroki.io/{kind}/png/"
 _CODECOGS = "https://latex.codecogs.com/png.latex?"
-_DICEBEAR = "https://api.dicebear.com/9.x/{style}/png"
 _URL_LIMIT = 1900
 _MAX_IMAGE = 4_000_000
 _TIMEOUT = 30
@@ -40,18 +39,6 @@ PALETTE = (
 _ROUND = frozenset({"pie", "doughnut", "polarArea"})
 CHART_TYPES = ("bar", "horizontalBar", "line", "pie", "doughnut", "radar", "polarArea")
 DIAGRAMS = ("mermaid", "graphviz", "plantuml")
-AVATARS = (
-    "adventurer",
-    "avataaars",
-    "big-smile",
-    "bottts",
-    "fun-emoji",
-    "lorelei",
-    "notionists",
-    "pixel-art",
-    "thumbs",
-    "identicon",
-)
 _SERVICES = {
     "chart": "QuickChart",
     "diagram": "mermaid.ink",
@@ -59,7 +46,6 @@ _SERVICES = {
     "plantuml": "Kroki",
     "qr": "QuickChart",
     "math": "CodeCogs",
-    "avatar": "DiceBear",
     "plot": "QuickChart",
 }
 
@@ -70,7 +56,6 @@ def visual_capabilities(http: HttpClient) -> tuple[Capability, ...]:
         _tool("render_diagram", _DIAGRAM_TEXT, _diagram_schema(), _diagram(http), 3600),
         _tool("render_qr", _QR_TEXT, _qr_schema(), _qr(http), 3600),
         _tool("render_math", _MATH_TEXT, _math_schema(), _math(http), 3600),
-        _tool("render_avatar", _AVATAR_TEXT, _avatar_schema(), _avatar(http), 3600),
     )
 
 
@@ -252,22 +237,6 @@ def _math(http: HttpClient) -> Callable[[Context, Mapping[str, Any]], Any]:
     return run
 
 
-def _avatar(http: HttpClient) -> Callable[[Context, Mapping[str, Any]], Any]:
-    async def run(_context: Context, args: Mapping[str, Any]) -> Result:
-        style = str(args.get("style") or "thumbs")
-        seed = str(args["seed"]).strip()[:60]
-        if style not in AVATARS or not seed:
-            return Result(ok=False, data={}, error=f"Style au choix : {', '.join(AVATARS)}.")
-        query = urllib.parse.urlencode({"seed": seed, "size": 384})
-        url = f"{_DICEBEAR.format(style=style)}?{query}"
-        problem = await verify(http, url)
-        if problem:
-            return Result(ok=False, data={}, error=f"Avatar : {problem}")
-        return shown("avatar", f"Avatar « {seed} »", url)
-
-    return run
-
-
 def _tool(
     name: str,
     description: str,
@@ -301,10 +270,6 @@ _QR_TEXT = "Crée un QR code pour un lien ou un texte (500 caractères au plus).
 _MATH_TEXT = (
     "Affiche une formule mathématique en image à partir de LaTeX, sans $ autour "
     "(\\frac{a}{b}, \\sqrt{x}, \\int_0^1 x^2 dx…). Pour une équation difficile à lire en texte."
-)
-_AVATAR_TEXT = (
-    "Génère un avatar (illustration) à partir d'un mot ou d'un nom : le même mot donne toujours "
-    "le même avatar. style : " + ", ".join(AVATARS) + ". Pour s'amuser ou illustrer un profil."
 )
 
 
@@ -354,15 +319,4 @@ def _math_schema() -> dict[str, Any]:
         "type": "object",
         "properties": {"latex": {"type": "string"}, "title": {"type": "string"}},
         "required": ["latex"],
-    }
-
-
-def _avatar_schema() -> dict[str, Any]:
-    return {
-        "type": "object",
-        "properties": {
-            "seed": {"type": "string", "description": "Mot ou nom qui détermine l'avatar"},
-            "style": {"type": "string", "enum": list(AVATARS)},
-        },
-        "required": ["seed"],
     }
