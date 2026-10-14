@@ -6,7 +6,6 @@ from typing import Any
 import discord
 
 from maria_core.db import Database
-from maria_core.discord.draft_view import DraftView, outcome
 from maria_core.discord.memory_menu import MemoryHub, MemoryState
 from maria_core.discord.task_menu import TaskHub
 from maria_core.llm.types import Completion
@@ -150,14 +149,3 @@ async def test_task_hub_names_each_kind_and_confirms_deletion() -> None:
     hub.build()
     assert "## Supprimer ?" in _texts(hub)
     assert _labels(hub) == ["Oui", "Non"]
-
-
-async def test_draft_card_shows_what_will_be_created_then_its_outcome() -> None:
-    draft = _objective(9, {"type": "at", "at": "2026-10-14T09:00"}, status="draft")
-    view = DraftView(9, draft)
-    assert f"## {SMALL_TASK} Tâche 9\n-# Rappel · brouillon · à confirmer" in _texts(view)
-    assert "**Message** · Sortir le chien" in _texts(view)
-    assert _labels(view) == ["Confirmer", "Annuler"]
-    done = outcome(draft, confirmed=False)
-    assert _labels(done) == []
-    assert "annulée" in _texts(done)

@@ -1,5 +1,6 @@
 """Le modèle décrit un objectif à plat. Le noyau en fait le déclencheur, la condition, l'action."""
 
+import re
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
@@ -123,12 +124,31 @@ def _interval(args: Mapping[str, Any], _now: datetime | None) -> dict[str, Any]:
     return {"type": "interval", "every_s": _minutes(args.get("every_minutes")) * 60}
 
 
+_QUOTES = {ord(char): " " for char in '«»"' + chr(0x201C) + chr(0x201D) + chr(0x201E)}
+_KIND = re.compile(
+    r"^(?:(?:le|la|les|un|une|des)\s+|l')?"
+    r"(?:film|s[eé]rie|jeu(?: vid[eé]o)?|livre|album|chanson|morceau|groupe|artiste|anime|manga|"
+    r"dessin anim[eé]|[eé]mission|youtubeur|streamer|marque|application)"
+    r"\s+(?:(?:de|du|des|d')\s*)?",
+    re.IGNORECASE,
+)
+_ARTICLE = re.compile(r"^(?:(?:le|la|les)\s+|l')", re.IGNORECASE)
+
+
+def clean_pattern(raw: str) -> str:
+    """« le film « Le Corset » » devient « corset » : seul le nom distinctif est guetté."""
+    text = " ".join(str(raw).translate(_QUOTES).split())
+    text = _KIND.sub("", text, count=1).strip()
+    bare = _ARTICLE.sub("", text, count=1).strip()
+    return bare if len(bare) >= 3 else text
+
+
 def _topic(args: Mapping[str, Any], _now: datetime | None) -> dict[str, Any]:
     raw = str(args.get("pattern") or "").strip()
-    topic = str(args.get("topic") or "").strip()
+    topic = " ".join(str(args.get("topic") or "").translate(_QUOTES).split())
     if not raw and not topic:
         raise ValueError("on_topic : un mot à guetter (pattern) ou un sujet (topic).")
-    words = [part.strip() for part in raw.split(",") if part.strip()]
+    words = list(dict.fromkeys(w for w in map(clean_pattern, raw.split(",")) if w))
     trigger: dict[str, Any] = {"type": "on_topic", "author": _author(args)}
     if words:
         trigger["pattern"] = words[0]

@@ -125,13 +125,6 @@ class ObjectiveStore:
                 return found
         return None
 
-    def recent_drafts(self, limit: int = 50) -> tuple[Objective, ...]:
-        rows = self._database.fetchall(
-            "SELECT * FROM objectives WHERE status = 'draft' ORDER BY id DESC LIMIT ?",
-            (limit,),
-        )
-        return tuple(_objective(row) for row in rows)
-
     def expire_drafts(self, before: datetime, now: datetime) -> int:
         result = self._database.execute(
             """

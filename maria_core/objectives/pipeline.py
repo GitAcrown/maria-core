@@ -258,7 +258,8 @@ def _plain(kind: str, instruction: str, current: Pass, signal: ObjectiveSignal |
         return f"{clip}\n<{current.url}>" if current.url else clip
     text = instruction or "C'est l'heure."
     if signal is not None and signal.kind == "message" and signal.text:
-        return f"{text}\n> {' '.join(signal.text.split())[:160]}"
+        who = f"**{signal.author_name}** : " if signal.author_name else ""
+        return f"{text}\n> {who}{' '.join(signal.text.split())[:160]}"
     if signal is not None:
         return f"{text}\n> {signal.fact()}"
     return text

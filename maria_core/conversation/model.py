@@ -129,7 +129,6 @@ class Reply:
     proposal_id: int | None = None
     learned_id: int | None = None
     trace: str = ""
-    draft_objective_id: int | None = None
 
     @property
     def text(self) -> str:

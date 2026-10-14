@@ -14,7 +14,7 @@ from maria_core.objectives.tools import apply
 
 logger = logging.getLogger(__name__)
 
-DRAFT_TTL = timedelta(minutes=10)
+DRAFT_TTL = timedelta(hours=3)  # un « oui » ou un « non » reste compris tout ce temps
 EXPIRE_AFTER = timedelta(days=1)
 _MAX_CHARS = 80
 

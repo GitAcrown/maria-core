@@ -377,7 +377,6 @@ class ConversationService:
             proposal_id=None if ask is None else ask.proposal_id,
             learned_id=None if ask is None else ask.learned_id,
             trace=ask.text if ask is not None and traced else "",
-            draft_objective_id=_draft(outcome),
         )
 
     def _history(self, channel_id: int) -> ChannelHistory:
@@ -406,14 +405,6 @@ class ConversationService:
                 1 if outcome.ok else 0,
             ),
         )
-
-
-def _draft(outcome: LoopResult) -> int | None:
-    for record in outcome.records:
-        data = record.result.data
-        if record.name == "objective_create" and record.result.ok and data.get("status") == "draft":
-            return int(data["id"])
-    return None
 
 
 def _assistant_entry(

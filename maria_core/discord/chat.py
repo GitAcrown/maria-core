@@ -8,7 +8,6 @@ from discord.ext import commands
 
 from maria_core.app import App
 from maria_core.conversation.model import Inbound, Reply
-from maria_core.discord.draft_view import send_draft
 from maria_core.discord.inbound import inbound_from_message
 from maria_core.discord.layout import build_views, quiet_links
 from maria_core.discord.learned_view import LearnedView
@@ -70,8 +69,6 @@ class ChatCog(commands.Cog):
                 last = await _send_extra(message.channel, extra, reply.trace) or last
         else:
             first, last = await _send_chunks(message.channel, reply, anchor, extra)
-        if reply.draft_objective_id is not None:
-            await send_draft(message.channel, self.app, reply.draft_objective_id)
         if first is not None:
             self.app.conversation.remember_reply(reply.user_message_id, first)
         if reply.proposal_id is not None and last is not None:
