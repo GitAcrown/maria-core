@@ -24,16 +24,26 @@ class DiscordCourier:
     async def send(self, objective: Objective, delivery: Delivery) -> None:
         destination = await self._destination(objective)
         dm = isinstance(destination, discord.User | discord.Member | discord.DMChannel)
-        origin = None if dm else await _origin(destination, delivery.reply_to)
+        elsewhere = delivery.trigger_channel not in (None, getattr(destination, "id", None))
+        trigger = None
+        if not dm and not elsewhere:
+            trigger = await _origin(destination, delivery.trigger)
+        origin = trigger
+        if origin is None and not dm:
+            origin = await _origin(destination, delivery.reply_to)
         body = _MENTION.sub("", delivery.text).strip()
-        if delivery.mention and not dm and origin is None:
+        if delivery.quote and trigger is None:
+            body = f"{body}\n> {delivery.quote}"
+        if delivery.mention and not dm and (origin is None or trigger is not None):
             body = f"<@{objective.owner_id}> {body}".strip()
-        footer = f"-# {delivery.footer}" if delivery.footer else ""
+        linked = (dm or elsewhere) and delivery.footer_linked
+        footer_text = delivery.footer_linked if linked else delivery.footer
+        footer = f"-# {footer_text}" if footer_text else ""
         mentions = discord.AllowedMentions(
             users=[discord.Object(id=objective.owner_id)],
             roles=False,
             everyone=False,
-            replied_user=delivery.mention,
+            replied_user=delivery.mention and trigger is None,
         )
         sent = await _post(destination, body, footer, delivery, origin, mentions)
         app = getattr(self._bot, "app", None)
