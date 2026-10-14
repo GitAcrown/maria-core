@@ -54,12 +54,16 @@ async def post_transcript(
         return ""
     clipped = transcript if len(transcript) <= _QUOTE_CHARS else transcript[:_QUOTE_CHARS] + "…"
     quoted = "\n".join(f"> {line}" if line else ">" for line in clipped.splitlines())
-    suffix = f"\n-# {TRANSCRIPT_LABEL}" + (f" · {detail}" if detail else "")
-    await _say(message, f"{quoted}{suffix}")
+    await _say(message, f"{quoted}\n-# {transcript_footer(detail)}")
     return transcript
 
 
 TRANSCRIPT_LABEL = f"{TRANSCRIPT_SUB} **Transcription**"
+
+
+def transcript_footer(requester: str = "") -> str:
+    """« Transcription · demandé par Léa » quand quelqu'un a cliqué sur l'emoji."""
+    return f"{TRANSCRIPT_LABEL} · demandé par {requester}" if requester else TRANSCRIPT_LABEL
 
 
 class VoiceCog(commands.Cog):
@@ -93,6 +97,7 @@ class VoiceCog(commands.Cog):
         transcript = await post_transcript(self.app, message, inbound, detail=requester)
         if transcript:
             self.app.conversation.attach_transcript(inbound, transcript)
+            await _drop_offer(message, self.bot.user)
 
 
 async def _offer(message: discord.Message) -> None:
@@ -100,6 +105,16 @@ async def _offer(message: discord.Message) -> None:
         await message.add_reaction(emojis(TRANSCRIBE_EMOJI))
     except discord.HTTPException:
         logger.debug("Réaction de transcription refusée", exc_info=True)
+
+
+async def _drop_offer(message: discord.Message, bot_user: discord.ClientUser | None) -> None:
+    """La transcription est faite : l'emoji que MARIA avait posé n'a plus de raison d'être."""
+    if bot_user is None:
+        return
+    try:
+        await message.remove_reaction(emojis(TRANSCRIBE_EMOJI), bot_user)
+    except discord.HTTPException:
+        logger.debug("Réaction de transcription déjà retirée", exc_info=True)
 
 
 async def _drop_reaction(message: discord.Message, payload: discord.RawReactionActionEvent) -> None:
