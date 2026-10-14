@@ -3,8 +3,9 @@
 import asyncio
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+from maria_core.objectives.model import DRAFT_TTL
 from maria_core.objectives.runner import Runner
 from maria_core.objectives.store import ObjectiveStore
 
@@ -19,11 +20,13 @@ class Scheduler:
         *,
         interval: float = 5.0,
         clock: Callable[[], datetime] | None = None,
+        draft_ttl: timedelta = DRAFT_TTL,
     ) -> None:
         self._store = store
         self._runner = runner
         self._interval = interval
         self._clock = clock or _now
+        self._draft_ttl = draft_ttl
         self._stopped = asyncio.Event()
 
     def stop(self) -> None:
@@ -40,8 +43,10 @@ class Scheduler:
                 continue
 
     async def tick(self) -> bool:
-        claimed = await asyncio.to_thread(self._store.claim, self._clock())
+        now = self._clock()
+        claimed = await asyncio.to_thread(self._store.claim, now)
         if claimed is None:
+            await asyncio.to_thread(self._store.expire_drafts, now - self._draft_ttl, now)
             return False
         await self._runner.execute(claimed)
         return True
