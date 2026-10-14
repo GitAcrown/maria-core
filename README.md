@@ -29,12 +29,17 @@ python -m maria_core --env-file .env
 
 ## Ce que fait MARIA
 
-- **Conversation** : mention, réponse à un de ses messages, `@everyone` si le salon l'autorise, son prénom (et en mode greedy, son prénom au milieu d'une phrase). Elle voit les citations de reply, les embeds, les messages transférés, les images, les fichiers texte joints. Un message privé ne lance pas de conversation : il ne sert qu'à recevoir un rappel ou une veille.
+- **Conversation** : mention, réponse à un de ses messages, `@everyone` si le salon l'autorise, son prénom (et en mode greedy, son prénom au milieu d'une phrase). Elle voit les citations de reply, les embeds, les messages transférés, les images. Un message privé ne lance pas de conversation : il ne sert qu'à recevoir un rappel ou une veille.
 - **Silence choisi** : quand on ne lui pose pas de vraie question, elle peut se contenter d'un emoji. « Réagis à mon message » pose une réaction.
 - **Vocaux** : transcription automatique si le salon l'a activée, ou quand on parle à MARIA ; sinon la réaction de transcription (emoji de MARIA, ou 📝 si le bot n'y a pas accès) transcrit à la demande. La transcription est postée en citation.
 - **Vues** : météo, films, jeux, morceaux, matchs, transports et images s'affichent en cartes Discord (Components v2). MARIA peut aussi composer une vue sur mesure (`render_widget`) ou un tableau (`render_table`).
 - **Objectifs** : rappels (« dans 10 min », « tous les lundis à 9 h »), récaps rédigés avec ses outils, veilles de page ou de prix, écoute d'un mot, d'un sujet ou d'un vocal. Ce qui ne part pas à coup sûr (condition, écoute, veille) est un brouillon : un « oui » ou le bouton le confirme.
-- **Mémoire** : elle retient ce qu'on lui demande, propose ce qui mérite de l'être (bouton Retenir / Ignorer), et ne garde un fait sur quelqu'un d'autre qu'avec l'accord de la personne.
+- **Fichiers et liens lus d'office** : texte, code, Word, PDF (avec `pypdf`) et pages web citées dans un message qui lui est adressé. Ce qu'elle ne peut pas lire (vidéo, archive, réseau social fermé, audio non transcrit, page sans texte) est annoncé comme tel : elle le dit au lieu de deviner.
+- **Mémoire silencieuse** : un fait clair sur toi (« je suis végétarien ») est retenu sans question, avec une trace « 🧠 Retenu : … » et un bouton Annuler. Un nouveau fait qui contredit un ancien le remplace (l'ancien se retrouve avec Annuler). Santé, religion, orientation, argent, justice : jamais retenu sans demander. Un gag ou une habitude du groupe est proposé aux modérateurs dans `/global`. `/preferences apprentissage` : automatique, « demande-moi d'abord » ou rien. `/moi` montre le résumé, tout ce qu'elle sait, et l'onglet « Appris récemment ».
+- **Profil** : ville, équipe de foot, arrêt habituel, et façon de te parler (longueur, ton, emojis). « Météo chez moi », « le match de mon équipe » ou « mon métro » marchent sans question, et la réponse dit ce qui vient du profil. Les champs se règlent dans `/profil` ou à la parole ; le style se déduit de la longueur et du ton de tes messages (jamais de leur contenu).
+- **Ce que j'ai raté** : « qu'est-ce que j'ai raté ? » résume depuis ton dernier départ du salon, sans durée à préciser.
+- **Vérification discrète** : une réponse qui donne des faits d'actualité sans avoir cherché est revérifiée une fois avec un outil, avec le même ton.
+- **Rapidité** : les lectures indépendantes d'un même tour (météo et foot, deux recherches d'images…) partent en parallèle ; les résultats publics sont mis en cache.
 - **Spontanéité** : réactions sur les messages de ceux qui lui parlent, emojis appris du serveur, suivi d'un échange qui continue.
 
 ## Commandes

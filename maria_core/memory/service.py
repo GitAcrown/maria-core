@@ -147,7 +147,12 @@ class Memories:
     async def _learn(
         self, message: Inbound, fact: str, actor: Actor, now: datetime
     ) -> MemoryAsk | None:
-        """Retient sans demander, remplace un fait que le nouveau contredit, laisse une trace."""
+        """Retient sans demander, remplace un fait que le nouveau contredit, laisse une trace.
+
+        Un fait sensible (santé, religion, argent…) ne part jamais seul : il est proposé.
+        """
+        if await self._sensitive(fact):
+            return await self._propose(message, fact, now)
         found = await asyncio.to_thread(
             self.store.search, fact, user_id=message.author_id, guild_id=message.guild_id, limit=6
         )
@@ -178,6 +183,12 @@ class Memories:
         if old is not None:
             trace += f" (au lieu de « {second_person(old.content)} »)"
         return MemoryAsk(trace, learned_id=memory.id)
+
+    async def _sensitive(self, fact: str) -> bool:
+        if self._engine is None:
+            return False
+        verdict = await self._engine.resolve("fact_sensitivity", {"text": fact[:300]})
+        return verdict.value == "sensitive"
 
     async def _superseded(self, own: list[Memory], fact: str) -> Memory | None:
         """Un souvenir de la personne que ce fait remplace : même sujet, un seul peut être vrai."""

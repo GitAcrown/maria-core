@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from maria_core.capabilities import CapabilityRegistry, Context, Result, Risk
 from maria_core.capabilities.runner import SlotSource, available, invoke
@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 
 _IMAGE_ERRORS = ("image", "invalid_image")
 _SEARCH = "search_web"
+_VERIFY_HINT = (
+    "[VÉRIFICATION] Ta réponse précédente donnait des faits d'actualité sans les avoir "
+    "vérifiés. Appelle l'outil adapté (recherche web, météo, score…) puis réponds à nouveau, "
+    "avec le même ton qu'avant."
+)
 
 
 @dataclass(slots=True)
@@ -58,11 +63,38 @@ class TurnRunner:
     async def run(self, data: TurnInput) -> LoopResult:
         choice = await self._choice(data.message)
         outcome = await self._once(data, choice)
+        outcome = await self._verified(data, outcome)
         if not outcome.ok and any(word in outcome.error.lower() for word in _IMAGE_ERRORS):
             logger.warning("Image refusée par le modèle, nouvel essai sans image")
             data.history.without_images()
             outcome = await self._once(data, choice)
         return outcome
+
+    async def _verified(self, data: TurnInput, outcome: LoopResult) -> LoopResult:
+        """Un fait d'actualité donné sans outil est revérifié une fois, sans toucher au ton."""
+        if self._engine is None or not outcome.ok or outcome.records or not outcome.text:
+            return outcome
+        question = data.message.text[:400]
+        state = {"question": question, "answer": outcome.text[:600], "tools": 0}
+        try:
+            verdict = await self._engine.resolve("claim_check", state)
+        except Exception:
+            logger.exception("Décision claim_check en échec")
+            return outcome
+        if verdict.value != "needs_check":
+            return outcome
+        logger.info("Réponse sans outil revérifiée pour le message %s", data.message.message_id)
+        hinted = replace(data, extras=(*data.extras, _VERIFY_HINT))
+        again = await self._once(hinted, "required")
+        if not again.ok or not again.records or not again.text:
+            return outcome
+        return replace(
+            again,
+            input_tokens=again.input_tokens + outcome.input_tokens,
+            output_tokens=again.output_tokens + outcome.output_tokens,
+            calls=again.calls + outcome.calls,
+            duration_ms=again.duration_ms + outcome.duration_ms,
+        )
 
     def system(self, data: TurnInput) -> str:
         parts = [self._prompt.render()]

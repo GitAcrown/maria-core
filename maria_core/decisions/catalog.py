@@ -7,6 +7,7 @@ from maria_core.decisions.registry import Decision
 from maria_core.decisions.rules import (
     address_rules,
     ambient_rules,
+    claim_rules,
     condition_rules,
     draft_rules,
     followup_rules,
@@ -16,6 +17,7 @@ from maria_core.decisions.rules import (
     memory_worth_rules,
     price_rules,
     reaction_rules,
+    sensitivity_rules,
     topic_rules,
 )
 from maria_core.decisions.types import Question, RuleHit
@@ -122,6 +124,23 @@ def builtin_decisions() -> tuple[Decision, ...]:
             criteria={"true": "Stable personal or server fact", "false": "Chatter or one-off"},
         ),
         _decision(
+            "fact_sensitivity",
+            fallback="ordinary",
+            threshold=0.7,
+            budget=300,
+            ttl=3600,
+            rules=sensitivity_rules,
+            instructions=(
+                "`text` is a fact someone told a chat bot about themselves. sensitive if it "
+                "touches health, mental health, sexuality, religion, politics, money, legal "
+                "trouble, family conflict or anything they might regret having stored."
+            ),
+            criteria={
+                "sensitive": "Health, sexuality, religion, politics, money, justice, intimate life",
+                "ordinary": "Tastes, hobbies, work, places, habits, pets, everyday life",
+            },
+        ),
+        _decision(
             "memory_conflict",
             fallback="keep",
             threshold=0.65,
@@ -136,6 +155,24 @@ def builtin_decisions() -> tuple[Decision, ...]:
             criteria={
                 "replace": "Same subject, the new fact supersedes or contradicts the old one",
                 "keep": "Different subject, or both facts can be true together",
+            },
+        ),
+        _decision(
+            "claim_check",
+            fallback="grounded",
+            threshold=0.7,
+            budget=300,
+            ttl=300,
+            rules=claim_rules,
+            instructions=(
+                "`answer` is what a chat bot replied to `question` WITHOUT looking anything up. "
+                "needs_check only if it states specific current or recent facts that memory "
+                "cannot guarantee (news, scores, prices, who currently holds a role, weather, "
+                "recent dates). Opinions, jokes, chat, maths and timeless knowledge are grounded."
+            ),
+            criteria={
+                "grounded": "General knowledge, chat, opinion, maths, or nothing time-sensitive",
+                "needs_check": "Specific current or recent facts that should be looked up",
             },
         ),
         _decision(

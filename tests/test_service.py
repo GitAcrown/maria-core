@@ -14,6 +14,7 @@ from maria_core.conversation.persona import clock_section
 from maria_core.conversation.service import UNAVAILABLE_TEXT, ConversationService
 from maria_core.db import Database
 from maria_core.decisions.engine import Decider
+from maria_core.decisions.rules import claim_rules
 from maria_core.decisions.types import Verdict
 from maria_core.llm.prompt import PromptSections
 from maria_core.llm.types import Completion, ToolCall
@@ -299,3 +300,79 @@ async def test_ambiguous_name_can_stay_silent(tmp_path: Path) -> None:
     assert engine.calls == 1
     assert client.seen == []
     database.close()
+
+
+class _Verifier:
+    """`intent` : chat. `claim_check` : ce qu'on lui a dit de répondre."""
+
+    def __init__(self, claim: str) -> None:
+        self.claim = claim
+        self.asked: list[str] = []
+
+    async def resolve(self, name: str, state: Mapping[str, Any]) -> Verdict:
+        self.asked.append(name)
+        value = self.claim if name == "claim_check" else "none"
+        return Verdict(name=name, value=value, path="model", confidence=0.9)
+
+
+def _lookup(calls: list[str]) -> CapabilityRegistry:
+    async def run(_context: Context, _args: Mapping[str, Any]) -> Result:
+        calls.append("search")
+        return Result(ok=True, data={"results": [{"title": "Le PSG a gagné 2-1"}]})
+
+    registry = CapabilityRegistry()
+    registry.register(
+        Capability(
+            name="search_web",
+            description="Cherche",
+            parameters={"type": "object", "properties": {}, "required": []},
+            risk=Risk.READ,
+            run=run,
+        )
+    )
+    return registry
+
+
+async def test_a_live_fact_given_without_a_tool_is_checked_once(tmp_path: Path) -> None:
+    calls: list[str] = []
+    client = ScriptedClient(
+        [
+            Completion(text="Le PSG a gagné 3-0 hier soir.", model="fake", input_tokens=5),
+            Completion(
+                text="",
+                tool_calls=(ToolCall(id="1", name="search_web", arguments={}),),
+                model="fake",
+                input_tokens=7,
+            ),
+            Completion(text="Le PSG a gagné 2-1 hier soir.", model="fake", input_tokens=2),
+        ]
+    )
+    engine = _Verifier("needs_check")
+    service, database = _open(tmp_path, client, engine=engine, capabilities=_lookup(calls))
+    reply = await service.handle(_message(mentioned=True, text="Maria, le PSG a fait quoi hier ?"))
+    assert reply is not None and reply.chunks == ("Le PSG a gagné 2-1 hier soir.",)
+    assert calls == ["search"]
+    assert client.choices[1] == "required"
+    row = database.fetchone("SELECT input_tokens FROM llm_calls")
+    assert row is not None and row["input_tokens"] == 14  # les deux essais sont comptés
+    database.close()
+
+
+async def test_chat_and_grounded_answers_are_left_alone(tmp_path: Path) -> None:
+    calls: list[str] = []
+    client = ScriptedClient([Completion(text="Le PSG a gagné 3-0 hier soir.", model="fake")])
+    service, database = _open(
+        tmp_path, client, engine=_Verifier("grounded"), capabilities=_lookup(calls)
+    )
+    reply = await service.handle(_message(mentioned=True, text="Maria, le PSG a fait quoi hier ?"))
+    assert reply is not None and reply.chunks == ("Le PSG a gagné 3-0 hier soir.",)
+    assert calls == [] and len(client.seen) == 1
+    database.close()
+
+
+def test_only_answers_with_checkable_facts_reach_the_decision() -> None:
+    assert claim_rules({"answer": "Salut, ça va bien et toi ?"}).value == "grounded"
+    assert claim_rules({"answer": "Le PSG a gagné 3-0 hier soir.", "tools": 1}).value == "grounded"
+    assert claim_rules({"answer": "Oui."}).value == "grounded"
+    assert claim_rules({"answer": "Il fait très beau en ce moment dans le sud."}) is None
+    assert claim_rules({"answer": "Le PSG a gagné 3-0 hier soir au Parc des Princes."}) is None

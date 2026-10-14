@@ -16,6 +16,7 @@ from maria_core.social.emojis import Usable, learn, learn_text, shortlist
 from maria_core.social.levels import Level, level_for, room_budget
 from maria_core.social.room import ATTENTION_WARM, FATIGUE_EXHAUSTED, Room
 from maria_core.social.score import Parts, parts_from
+from maria_core.social.seen import Seen
 from maria_core.social.store import DAILY_DECISIONS, SocialStore
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class Social:
         self._database = database
         self._engine = engine
         self._store = SocialStore(database)
+        self.seen = Seen(database)
         self.room = Room(self._clock)
         self.reactor: Reactor | None = None
         self.usable: Usable = _any_emoji
@@ -71,6 +73,7 @@ class Social:
             return
         self.room.note(message.channel_id, message.author_id)
         now = self._clock()
+        await asyncio.to_thread(self.seen.touch, message.author_id, message.channel_id, now)
         await asyncio.to_thread(record, self._database, message.guild_id, now)
         if message.text:
             await asyncio.to_thread(

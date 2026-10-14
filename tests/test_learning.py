@@ -10,6 +10,7 @@ import pytest
 
 from maria_core.conversation.model import Inbound
 from maria_core.db import Database
+from maria_core.decisions.rules import sensitivity_rules
 from maria_core.decisions.types import Verdict
 from maria_core.discord.memory_menu import MemoryHub, MemoryState
 from maria_core.llm.types import Completion
@@ -168,3 +169,24 @@ async def test_the_recently_learned_tab_lists_what_maria_kept_and_lets_you_undo(
     labels = [str(i.label) for i in hub.walk_children() if isinstance(i, discord.ui.Button)]
     assert {"Modifier", "Oublier", "Annuler la modif"} <= set(labels)
     database.close()
+
+
+async def test_a_sensitive_fact_is_asked_about_never_kept_silently(tmp_path: Path) -> None:
+    class Sensitive(_Engine):
+        async def resolve(self, name: str, state: dict[str, object]) -> Verdict:
+            if name == "fact_sensitivity":
+                return Verdict(name=name, value="sensitive", path="rules", confidence=1)
+            return await super().resolve(name, state)
+
+    book, database = _book(tmp_path, Sensitive())
+    ask = await book.observe(_message("je suis suivi par un psy depuis des mois"))
+    assert ask is not None and ask.proposal_id is not None and ask.learned_id is None
+    assert ask.text.endswith("?")
+    assert book.store.count_active() == 0
+    database.close()
+
+
+def test_obvious_sensitive_words_are_caught_without_a_model() -> None:
+    assert sensitivity_rules({"text": "je fais une dépression"}).value == "sensitive"
+    assert sensitivity_rules({"text": "je suis musulman et je vote à gauche"}).value == "sensitive"
+    assert sensitivity_rules({"text": "j'habite à Lyon et j'adore les chats"}) is None
