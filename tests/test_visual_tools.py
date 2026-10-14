@@ -14,6 +14,7 @@ from maria_core.capabilities.builtin.plots import plot_capability
 from maria_core.capabilities.builtin.visuals import (
     chart_config,
     diagram_url,
+    look_of,
     render_visual,
     visual_capabilities,
 )
@@ -115,7 +116,8 @@ async def test_a_diagram_is_checked_and_a_refusal_goes_back_to_the_model() -> No
 def test_diagram_addresses_are_built_for_each_service_and_capped() -> None:
     url = diagram_url("graphviz", "digraph G { a -> b }")
     packed = url.removeprefix("https://kroki.io/graphviz/png/")
-    assert zlib.decompress(base64.urlsafe_b64decode(packed)).decode() == "digraph G { a -> b }"
+    source = zlib.decompress(base64.urlsafe_b64decode(packed)).decode()
+    assert source.endswith("a -> b }") and 'bgcolor="white"' in source
     assert diagram_url("plantuml", "@startuml\nA -> B\n@enduml").startswith("https://kroki.io/")
     with pytest.raises(ValueError, match="trop gros"):
         diagram_url("mermaid", "graph TD; " + "; ".join(f"N{i}-->N{i + 1}" for i in range(400)))
@@ -186,3 +188,54 @@ async def test_a_function_plot_skips_undefined_points_and_refuses_empty_ones() -
     assert not nothing.ok and "nulle part" in nothing.error
     reversed_ = await _run(registry, "plot_function", expressions=["x"], xmin=3, xmax=1)
     assert not reversed_.ok
+
+
+def test_the_look_is_chosen_per_image_and_texts_stay_readable() -> None:
+    args = {"type": "bar", "labels": ["a", "b"], "datasets": [{"label": "x", "data": [1, 2]}]}
+    dark = chart_config({**args, "theme": "dark", "colors": ["red", "#00ff88"]})
+    assert dark["options"]["legend"]["labels"]["fontColor"] == "#f2f3f5"
+    assert dark["options"]["scales"]["xAxes"][0]["gridLines"]["color"] == "#4e5058"
+    assert dark["data"]["datasets"][0]["backgroundColor"] == "red"
+    pie = chart_config({**args, "type": "pie", "colors": ["#111", "#222"]})
+    assert pie["data"]["datasets"][0]["backgroundColor"] == ["#111", "#222"]
+    assert "scales" not in pie["options"]
+    radar = chart_config({**args, "type": "radar", "theme": "transparent"})
+    assert radar["options"]["scale"]["pointLabels"]["fontColor"] == "#f2f3f5"
+    with pytest.raises(ValueError, match="Couleur illisible"):
+        chart_config({**args, "colors": ["rouge vif!"]})
+
+
+async def test_the_chosen_background_reaches_the_chart_service() -> None:
+    sent: list[dict[str, Any]] = []
+
+    def handler(method: str, url: str, headers: Any, body: Any) -> HttpResponse:
+        sent.append(json.loads(body))
+        reply = {"success": True, "url": "https://quickchart.io/chart/render/x"}
+        return HttpResponse(200, json.dumps(reply).encode(), {})
+
+    registry = _registry(FakeHttp(handler))
+    base = {"type": "bar", "labels": ["a"], "datasets": [{"label": "x", "data": [1]}]}
+    for theme, background in (("dark", "#2b2d31"), ("transparent", "transparent"), (None, "white")):
+        extra = {} if theme is None else {"theme": theme}
+        assert (await _run(registry, "render_chart", **base, **extra)).ok
+        assert sent[-1]["backgroundColor"] == background
+
+
+def test_diagrams_follow_the_theme_for_each_service() -> None:
+    mermaid = "graph TD; A-->B"
+    assert diagram_url("mermaid", mermaid).endswith("?type=png&theme=default&bgColor=!white")
+    assert diagram_url("mermaid", mermaid, look_of("dark")).endswith(
+        "?type=png&theme=dark&bgColor=2b2d31"
+    )
+    assert diagram_url("mermaid", mermaid, look_of("transparent")).endswith("?type=png&theme=dark")
+
+    def unpack(url: str) -> str:
+        return zlib.decompress(base64.urlsafe_b64decode(url.rsplit("/", 1)[1])).decode()
+
+    dot = unpack(diagram_url("graphviz", "digraph G { a -> b }", look_of("transparent")))
+    assert 'bgcolor="transparent"' in dot and 'node [fontcolor="#f2f3f5"' in dot
+    sequence = "@startuml\nA -> B\n@enduml"
+    uml = unpack(diagram_url("plantuml", sequence, look_of("dark")))
+    assert uml.startswith("@startuml\nskinparam backgroundColor #2b2d31")
+    assert uml.endswith("A -> B\n@enduml")
+    assert unpack(diagram_url("plantuml", sequence)) == sequence
