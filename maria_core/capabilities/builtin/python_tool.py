@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -75,7 +76,7 @@ def _isolated(code: str) -> dict[str, Any]:
             input=code.encode("utf-8"),
             capture_output=True,
             timeout=_TIMEOUT,
-            cwd=os.environ.get("TEMP") or os.environ.get("TMP") or ".",
+            cwd=tempfile.gettempdir(),
             env=_env(),
             check=False,
         )
