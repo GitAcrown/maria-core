@@ -10,6 +10,7 @@ from maria_core.capabilities.runner import invoke
 from maria_core.config import Settings
 from maria_core.conversation.model import Inbound
 from maria_core.db import Database
+from maria_core.decisions.rules import request_rules
 from maria_core.decisions.types import Verdict
 from maria_core.llm.types import ToolCall
 from maria_core.objectives.catalog import register_builtin_kinds
@@ -416,4 +417,52 @@ async def test_only_what_can_become_a_chore_asks_for_a_yes(tmp_path: Path) -> No
         "threshold": 50,
     }
     assert (await _create(service, tmp_path, title="Prix", text="x", **watch))["status"] == "draft"
+    database.close()
+
+
+def test_a_request_is_recognised_by_its_words_not_by_a_remark() -> None:
+    assert request_rules({"text": "Maria, préviens-moi si on parle du Corset"}).value is True
+    assert request_rules({"text": "ping-moi quand quelqu'un dit ranked"}).value is True
+    assert request_rules({"text": "dis-moi si le prix baisse"}).value is True
+    assert request_rules({"text": "ah oui"}).value is False
+    assert request_rules({"text": "ah oui le film LE CORSET"}) is None  # au juge, qui dit non
+
+
+async def test_a_listening_objective_is_not_created_from_a_remark(tmp_path: Path) -> None:
+    clock = [_NOW]
+    service, database, _courier = _open(tmp_path, clock)
+    asked: list[str] = []
+
+    async def is_request(text: str) -> bool:
+        asked.append(text)
+        return "préviens" in text
+
+    service.is_request = is_request
+    registry = CapabilityRegistry()
+    for capability in objective_capabilities(service):
+        registry.register(capability)
+
+    async def create(said: str, /, **arguments: object) -> object:
+        context = Context(
+            user_id=7,
+            guild_id=5,
+            channel_id=3,
+            message_id=99,
+            is_owner=False,
+            is_moderator=False,
+            text=said,
+        )
+        call = ToolCall(id="1", name="objective_create", arguments=dict(arguments))
+        return await invoke(registry, Settings.for_tests(tmp_path), context, call)
+
+    listen = {"title": "Corset", "trigger_type": "on_topic", "pattern": "corset"}
+    listen |= {"action_type": "alert", "text": "Quelqu'un parle du film"}
+    remark = await create("ah oui le film LE CORSET", **listen)
+    assert not remark.ok and "pas demandé" in remark.error
+    asked_for = await create("préviens-moi si on parle du Corset", **listen)
+    assert asked_for.ok
+    reminder = {"title": "Chien", "trigger_type": "at", "in_minutes": 5, "action_type": "remind"}
+    reminder |= {"text": "Sors le chien"}
+    assert (await create("dans 5 min sors le chien", **reminder)).ok
+    assert asked == ["ah oui le film LE CORSET", "préviens-moi si on parle du Corset"]
     database.close()
