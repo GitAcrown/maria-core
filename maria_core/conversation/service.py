@@ -340,7 +340,8 @@ class ConversationService:
         ask: MemoryAsk | None,
     ) -> Reply | None:
         text = composed.text
-        if ask is not None:
+        traced = ask is not None and ask.learned_id is not None
+        if ask is not None and not traced:
             text = f"{text}\n\n{ask.text}".strip()
         if not text and not composed.cards:
             return None
@@ -362,6 +363,8 @@ class ConversationService:
             cards=composed.cards,
             footer=composed.footer,
             proposal_id=None if ask is None else ask.proposal_id,
+            learned_id=None if ask is None else ask.learned_id,
+            trace=ask.text if ask is not None and traced else "",
             draft_objective_id=_draft(outcome),
         )
 

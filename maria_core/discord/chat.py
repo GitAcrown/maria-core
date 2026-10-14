@@ -11,6 +11,7 @@ from maria_core.conversation.model import Inbound, Reply
 from maria_core.discord.draft_view import send_draft
 from maria_core.discord.inbound import inbound_from_message
 from maria_core.discord.layout import build_views, quiet_links
+from maria_core.discord.learned_view import LearnedView
 from maria_core.discord.memory_view import ProposalView
 from maria_core.discord.voice import prepare_voice
 from maria_core.objectives.signals import ObjectiveSignal
@@ -66,7 +67,7 @@ class ChatCog(commands.Cog):
         if reply.cards:
             first, last = await _send_views(message.channel, reply, anchor)
             if extra is not None:
-                last = await _send_extra(message.channel, extra) or last
+                last = await _send_extra(message.channel, extra, reply.trace) or last
         else:
             first, last = await _send_chunks(message.channel, reply, anchor, extra)
         if reply.draft_objective_id is not None:
@@ -75,6 +76,8 @@ class ChatCog(commands.Cog):
             self.app.conversation.remember_reply(reply.user_message_id, first)
         if reply.proposal_id is not None and last is not None:
             await _attach(self.app, reply.proposal_id, last)
+        if reply.learned_id is not None and last is not None:
+            await asyncio.to_thread(self.app.memory.learned.attach_reply, reply.learned_id, last)
 
 
 async def _send_views(
@@ -120,11 +123,13 @@ async def _send_chunks(
     view: discord.ui.View | None,
 ) -> tuple[int | None, int | None]:
     chunks = [quiet_links(chunk) for chunk in reply.chunks]
-    if reply.footer:
-        if chunks and len(chunks[-1]) + len(reply.footer) + 1 <= _LIMIT:
-            chunks[-1] = f"{chunks[-1]}\n{quiet_links(reply.footer)}"
+    for line in (reply.footer, reply.trace):
+        if not line:
+            continue
+        if chunks and len(chunks[-1]) + len(line) + 1 <= _LIMIT:
+            chunks[-1] = f"{chunks[-1]}\n{quiet_links(line)}"
         else:
-            chunks.append(quiet_links(reply.footer))
+            chunks.append(quiet_links(line))
     first: int | None = None
     last: int | None = None
     final = len(chunks) - 1
@@ -142,9 +147,11 @@ async def _send_chunks(
     return first, last
 
 
-async def _send_extra(channel: discord.abc.Messageable, view: discord.ui.View) -> int | None:
+async def _send_extra(
+    channel: discord.abc.Messageable, view: discord.ui.View, text: str = ""
+) -> int | None:
     try:
-        sent = await channel.send("-# Retenir ?", view=view, allowed_mentions=SILENT)
+        sent = await channel.send(text or "-# Retenir ?", view=view, allowed_mentions=SILENT)
     except discord.HTTPException:
         return None
     return sent.id
@@ -167,6 +174,8 @@ async def _try_edit(message: discord.Message, reply: Reply) -> bool:
 
 
 def _extra_view(reply: Reply) -> discord.ui.View | None:
+    if reply.learned_id is not None:
+        return LearnedView(reply.learned_id)
     if reply.proposal_id is not None:
         return ProposalView(reply.proposal_id)
     return None

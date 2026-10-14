@@ -10,7 +10,7 @@ from maria_core.config import Settings
 
 
 def test_open_migrates_and_close_is_idempotent(app: App) -> None:
-    assert app.database.version == 14
+    assert app.database.version == 15
     app.close()
     app.close()
 
@@ -20,7 +20,7 @@ def test_a_broken_plugin_does_not_stop_the_process(tmp_path: Path) -> None:
     opened = App.open(settings)
     try:
         assert opened.plugins.names == ()
-        assert opened.database.version == 14
+        assert opened.database.version == 15
     finally:
         opened.close()
 
@@ -65,4 +65,4 @@ def test_check_command_migrates_without_a_token(tmp_path: Path, monkeypatch) -> 
     finally:
         connection.close()
     assert version is not None
-    assert version[0] == 14
+    assert version[0] == 15

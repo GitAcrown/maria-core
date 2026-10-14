@@ -75,6 +75,7 @@ async def test_an_explicit_request_is_stored_and_a_copy_is_not(tmp_path: Path) -
 
 async def test_an_ignored_proposal_is_not_injected(tmp_path: Path) -> None:
     book, database = _book(tmp_path, engine=_Yes())
+    book.set_learning(7, 5, "ask")
     ask = await _observe(book, "je suis vegetarien depuis des annees")
     assert ask is not None
     assert book.store.count_active() == 0

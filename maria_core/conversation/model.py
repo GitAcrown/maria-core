@@ -126,6 +126,8 @@ class Reply:
     cards: tuple[Card, ...] = ()
     footer: str = ""
     proposal_id: int | None = None
+    learned_id: int | None = None
+    trace: str = ""
     draft_objective_id: int | None = None
 
     @property

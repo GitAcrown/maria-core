@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import timedelta
 
 import discord
 
@@ -26,7 +27,12 @@ from maria_core.memory.store import MemoryDenied
 
 PAGE = 15
 _RED = discord.ButtonStyle.danger
-_SOURCES = {"explicit": "dit explicitement", "proposal": "proposition acceptée"}
+_EMPTY = {
+    "memories": "*Aucun souvenir pour l'instant.*",
+    "proposals": "*Rien à valider.*",
+    "recent": "*Rien appris seule ces derniers jours.*",
+}
+_SOURCES = {"explicit": "dit explicitement", "confirmed": "validé"}
 
 
 @dataclass(slots=True)
@@ -39,6 +45,7 @@ class MemoryState:
     summary: str = ""
     memories: tuple[Memory, ...] = ()
     proposals: tuple[Proposal, ...] = ()
+    recent: tuple[Memory, ...] = ()
 
 
 class MemoryHub(Hub):
@@ -66,6 +73,9 @@ class MemoryHub(Hub):
         else:
             state.memories = await asyncio.to_thread(self.app.memory.store.list_for, state.user_id)
             state.proposals = await asyncio.to_thread(self.app.memory.store.open_for, state.user_id)
+            state.recent = await asyncio.to_thread(
+                self.app.memory.learned.recent, state.user_id, self.app.memory.now()
+            )
         state.summary = await self.app.memory_summaries.summarize(
             state.memories, collective=state.collective, name=state.name
         )
@@ -84,18 +94,18 @@ class MemoryHub(Hub):
         state = self.state
         waiting = len(state.proposals)
         meta = f"{len(state.memories)} souvenir(s)" + (f" · {waiting} à valider" if waiting else "")
-        items = state.memories if self.tab == "memories" else state.proposals
+        items = self._items()
         total = pages(len(items), PAGE)
         self.page = max(0, min(self.page, total - 1))
         shown = items[self.page * PAGE : (self.page + 1) * PAGE]
         content: list[discord.ui.Item] = [title(self._heading(), meta), wide()]
         if self.tab == "memories":
             content += [body(state.summary), thin()]
-        lines = [f"\u203a {clip(item.content, 150)}" for item in shown]
-        empty = (
-            "*Aucun souvenir pour l'instant.*" if self.tab == "memories" else "*Rien à valider.*"
-        )
+        lines = [f"\u203a {clip(item.content, 150)}{self._age(item)}" for item in shown]
+        empty = _EMPTY[self.tab]
         content.append(body("\n".join(lines) if lines else empty))
+        if self.tab == "recent" and lines:
+            content.append(body("-# Ouvre un souvenir pour l'annuler, le modifier ou l'oublier."))
         if total > 1:
             content.append(body(f"-# Page {self.page + 1}/{total}"))
         if self.note:
@@ -106,13 +116,9 @@ class MemoryHub(Hub):
         self, shown: tuple[Memory, ...] | tuple[Proposal, ...], total: int
     ) -> list[discord.ui.ActionRow]:
         rows: list[discord.ui.ActionRow] = []
-        if self.state.proposals:
-            rows.append(
-                discord.ui.ActionRow(
-                    self._tab("memories", "Souvenirs"),
-                    self._tab("proposals", f"À valider ({len(self.state.proposals)})"),
-                )
-            )
+        tabs = self._tabs()
+        if len(tabs) > 1:
+            rows.append(discord.ui.ActionRow(*tabs))
         if shown:
             options = [option(item.id, item.content, _when(item)) for item in shown]
             rows.append(discord.ui.ActionRow(Picker("Ouvrir…", options, self._open)))
@@ -212,6 +218,24 @@ class MemoryHub(Hub):
 
         await self.act(interaction, wipe, f"{len(memories)} souvenir(s) effacé(s).")
 
+    def _items(self) -> tuple[Memory, ...] | tuple[Proposal, ...]:
+        if self.tab == "proposals":
+            return self.state.proposals
+        return self.state.recent if self.tab == "recent" else self.state.memories
+
+    def _tabs(self) -> list[Action]:
+        tabs = [self._tab("memories", "Souvenirs")]
+        if self.state.recent:
+            tabs.append(self._tab("recent", f"Appris récemment ({len(self.state.recent)})"))
+        if self.state.proposals:
+            tabs.append(self._tab("proposals", f"À valider ({len(self.state.proposals)})"))
+        return tabs
+
+    def _age(self, item: Memory | Proposal) -> str:
+        if self.tab != "recent" or not isinstance(item, Memory):
+            return ""
+        return f"  -# {_ago(self.app.memory.now() - item.updated_at)}"
+
     def _heading(self) -> str:
         return f"Mémoire · {self.state.name}"
 
@@ -240,7 +264,7 @@ class MemoryHub(Hub):
 
     async def _open(self, interaction: discord.Interaction, value: str) -> None:
         self.selected = int(value)
-        self.screen = "memory" if self.tab == "memories" else "proposal"
+        self.screen = "proposal" if self.tab == "proposals" else "memory"
         self.note = ""
         await self.refresh(interaction)
 
@@ -258,13 +282,23 @@ class MemoryHub(Hub):
 
     async def _forget(self, interaction: discord.Interaction) -> None:
         store, now = self.app.memory.store, self.app.memory.now()
-        await self.act(interaction, lambda: store.forget(self.actor, self.selected, now), "Oublié.")
+        learned = self.app.memory.learned
+
+        def forget() -> None:
+            store.forget(self.actor, self.selected, now)
+            learned.clear(self.selected or 0)
+
+        await self.act(interaction, forget, "Oublié.")
 
     async def _undo(self, interaction: discord.Interaction) -> None:
         store, now = self.app.memory.store, self.app.memory.now()
-        await self.act(
-            interaction, lambda: store.undo(self.actor, self.selected, now), "Modification annulée."
-        )
+        learned = self.app.memory.learned
+
+        def undo() -> None:
+            store.undo(self.actor, self.selected, now)
+            learned.clear(self.selected or 0)
+
+        await self.act(interaction, undo, "Modification annulée.")
 
     async def _accept(self, interaction: discord.Interaction) -> None:
         store, now = self.app.memory.store, self.app.memory.now()
@@ -343,6 +377,17 @@ def _when(item: Memory | Proposal) -> str:
     if isinstance(item, Proposal):
         return f"proposé le {item.created_at:%d/%m/%Y}"
     return f"retenu le {item.created_at:%d/%m/%Y}"
+
+
+def _ago(delta: timedelta) -> str:
+    minutes = int(delta.total_seconds() // 60)
+    if minutes < 2:
+        return "à l'instant"
+    if minutes < 60:
+        return f"il y a {minutes} min"
+    if minutes < 1440:
+        return f"il y a {minutes // 60} h"
+    return f"il y a {minutes // 1440} j"
 
 
 async def open_memory(interaction: discord.Interaction, app: App, *, collective: bool) -> None:

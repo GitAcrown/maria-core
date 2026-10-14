@@ -48,7 +48,7 @@ Slash (après `5!sync`) :
 | `/programmes` | Rappels, écoutes et surveillances : modifier, pause, reprise, saut, confirmation, suppression, tout supprimer |
 | `/info` | Réglages du salon et outils disponibles |
 | `/chatbot mode\|forget\|everyone\|autotranscribe\|python\|spontaneite` | Réglages, modérateurs |
-| `/preferences propositions\|reactions` | Réglages personnels |
+| `/preferences apprentissage\|reactions` | Réglages personnels |
 
 Préfixe (`5!` par défaut) : `spontaneite`. Propriétaire : `why <lien>`, `status`, `usage [jours]`, `keys`, `presence`, `plugin load|unload|reload`, `sync`, `update`, `restart`, `shutdown`.
 

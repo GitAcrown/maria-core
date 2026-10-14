@@ -122,6 +122,23 @@ def builtin_decisions() -> tuple[Decision, ...]:
             criteria={"true": "Stable personal or server fact", "false": "Chatter or one-off"},
         ),
         _decision(
+            "memory_conflict",
+            fallback="keep",
+            threshold=0.65,
+            budget=300,
+            ttl=600,
+            rules=None,
+            instructions=(
+                "`old` is a stored fact about a person, `new` is what they just said. "
+                "replace only if `new` updates or contradicts `old` (same subject, only one can "
+                "be true now). keep if both can be true at once."
+            ),
+            criteria={
+                "replace": "Same subject, the new fact supersedes or contradicts the old one",
+                "keep": "Different subject, or both facts can be true together",
+            },
+        ),
+        _decision(
             "followup",
             fallback="ignore",
             threshold=0.58,

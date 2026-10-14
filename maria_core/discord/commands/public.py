@@ -18,12 +18,18 @@ from maria_core.discord.hub import answer, card, refuse
 from maria_core.discord.memory_menu import open_memory
 from maria_core.discord.profile_menu import open_profile
 from maria_core.discord.task_menu import open_tasks
+from maria_core.memory.service import LEARNING
 from maria_core.social.levels import LEVELS, set_level, set_member_level
 
 _MODES = [
     app_commands.Choice(name="Off — ne répond plus", value="off"),
     app_commands.Choice(name="Strict — mention, réponse, ou son prénom", value="strict"),
     app_commands.Choice(name="Greedy — répond aussi quand on parle d'elle", value="greedy"),
+]
+_LEARNING = [
+    app_commands.Choice(name="Automatique — elle retient seule, j'annule si besoin", value="auto"),
+    app_commands.Choice(name="Elle me demande avant de retenir", value="ask"),
+    app_commands.Choice(name="Elle ne retient rien sur moi", value="off"),
 ]
 _LEVELS = [
     app_commands.Choice(name="Off — aucune réaction spontanée", value="off"),
@@ -141,16 +147,23 @@ class PublicCommands(commands.Cog):
         name="preferences", description="Tes réglages avec MARIA", guild_only=True
     )
 
-    @preferences.command(name="propositions", description="MARIA te propose de retenir des faits")
-    async def proposals(self, interaction: discord.Interaction, actif: bool) -> None:
+    @preferences.command(name="apprentissage", description="Ce que MARIA retient sur toi")
+    @app_commands.choices(mode=_LEARNING)
+    async def learning(
+        self, interaction: discord.Interaction, mode: app_commands.Choice[str]
+    ) -> None:
         guild = interaction.guild
         if guild is None:
             await refuse(interaction, "Disponible sur un serveur.")
             return
         app = _app(self.bot)
-        await asyncio.to_thread(app.memory.set_prompts, interaction.user.id, guild.id, actif)
-        state = "activées" if actif else "désactivées"
-        await answer(interaction, "Propositions de souvenirs", f"**{state.capitalize()}**.")
+        await asyncio.to_thread(app.memory.set_learning, interaction.user.id, guild.id, mode.value)
+        await answer(
+            interaction,
+            "Apprentissage",
+            f"**{LEARNING[mode.value]}**.",
+            meta="Retrouve et annule ce qu'elle a retenu dans /moi",
+        )
 
     @preferences.command(name="reactions", description="Réactions spontanées sur tes messages")
     @app_commands.choices(niveau=[*_LEVELS, app_commands.Choice(name="Comme le serveur", value="")])
