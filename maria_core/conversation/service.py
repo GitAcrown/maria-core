@@ -124,7 +124,14 @@ class ConversationService:
             return None
         route = await self._resolve(message, policy)
         if route.action is Action.RESPOND and not self._admits(message):
-            logger.info("Adresse ignorée, plafond atteint pour %s", message.author_id)
+            seen = self._social.room if self._social is not None else None
+            logger.info(
+                "Adresse ignorée, frein anti-rafale pour %s : %s message(s) de lui et %s dans le "
+                "salon sur 10 min, trop de réponses déjà données",
+                message.author_id,
+                seen.from_author(message.channel_id, message.author_id) if seen else 0,
+                seen.volume(message.channel_id) if seen else 0,
+            )
             route = Route(Action.STORE, "pressure")
         if route.action is Action.IGNORE:
             return None
