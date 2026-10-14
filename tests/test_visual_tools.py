@@ -19,6 +19,7 @@ from maria_core.capabilities.builtin.visuals import (
 )
 from maria_core.capabilities.http import HttpResponse
 from maria_core.llm.schema import openai_tool
+from maria_core.ui.emojis import CHART
 from tests.http_fake import FakeHttp
 
 
@@ -81,7 +82,7 @@ async def test_a_chart_is_created_then_shown_with_its_title() -> None:
     assert len(config["data"]["datasets"][0]["backgroundColor"]) == 2
     card = render_visual(result.data).cards[0]
     assert [block.kind for block in card.blocks] == ["text", "separator", "gallery", "footer"]
-    assert card.blocks[0].text == "## 📊 Scores"
+    assert card.blocks[0].text == f"## {CHART} Scores"
     assert card.blocks[3].text == "QuickChart · image générée"
 
 
