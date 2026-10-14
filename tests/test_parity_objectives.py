@@ -314,7 +314,7 @@ def test_a_listening_trigger_keeps_only_the_distinctive_name() -> None:
     assert misérables["pattern"] == "Misérables"
 
 
-async def test_a_draft_is_still_confirmed_by_a_plain_message_hours_later(tmp_path: Path) -> None:
+async def test_a_draft_is_confirmed_by_a_plain_message_within_a_few_minutes(tmp_path: Path) -> None:
     clock = [_NOW]
     service, database, _courier = _open(tmp_path, clock)
     data = await _create(
@@ -328,14 +328,14 @@ async def test_a_draft_is_still_confirmed_by_a_plain_message_hours_later(tmp_pat
         repeat=True,
     )
     assert data["status"] == "draft"
-    clock[0] = _NOW + timedelta(hours=2)
+    clock[0] = _NOW + timedelta(minutes=4)
     drafts = Drafts(service, _Engine("accept"))
     assert await drafts.answer(_inbound("oui")) is True
     assert service.store.get(int(str(data["id"]))).status == "active"
     database.close()
 
 
-async def test_a_forgotten_draft_stops_listening_after_a_while(tmp_path: Path) -> None:
+async def test_a_forgotten_draft_is_cancelled_by_itself_after_a_few_minutes(tmp_path: Path) -> None:
     clock = [_NOW]
     service, database, _courier = _open(tmp_path, clock)
     await _create(
@@ -348,8 +348,10 @@ async def test_a_forgotten_draft_stops_listening_after_a_while(tmp_path: Path) -
         text="ça parle de ranked",
         repeat=True,
     )
-    clock[0] = _NOW + timedelta(hours=5)
+    clock[0] = _NOW + timedelta(minutes=6)
     assert await Drafts(service, _Engine("accept")).answer(_inbound("oui")) is False
+    assert await service.scheduler.tick() is False  # rien à exécuter, mais le brouillon expire
+    assert service.store.list_for(7) == ()
     database.close()
 
 

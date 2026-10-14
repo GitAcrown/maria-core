@@ -2,10 +2,12 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import MappingProxyType
 from typing import Any
 
+# Un brouillon attend un « oui » ou un « non » ce temps-là, puis il est annulé.
+DRAFT_TTL = timedelta(minutes=5)
 _STATUSES = frozenset({"draft", "active", "paused", "done", "cancelled", "failed"})
 _DELIVERS = frozenset({"channel", "dm"})
 

@@ -3,19 +3,16 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
 
 from maria_core.conversation.model import Inbound
 from maria_core.decisions.engine import Decider
-from maria_core.objectives.model import StaleObjective
+from maria_core.objectives.model import DRAFT_TTL, StaleObjective
 from maria_core.objectives.runtime import Objectives
 from maria_core.objectives.schedule import describe
 from maria_core.objectives.tools import apply
 
 logger = logging.getLogger(__name__)
 
-DRAFT_TTL = timedelta(hours=3)  # un « oui » ou un « non » reste compris tout ce temps
-EXPIRE_AFTER = timedelta(days=1)
 _MAX_CHARS = 80
 
 type Reactor = Callable[[int, int, str], Awaitable[bool]]
@@ -55,4 +52,4 @@ class Drafts:
 
     def expire(self) -> int:
         now = self._objectives.now()
-        return self._objectives.store.expire_drafts(now - EXPIRE_AFTER, now)
+        return self._objectives.store.expire_drafts(now - DRAFT_TTL, now)
