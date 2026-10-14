@@ -17,6 +17,7 @@ from maria_core.decisions.rules import (
     memory_worth_rules,
     price_rules,
     reaction_rules,
+    request_rules,
     sensitivity_rules,
     topic_rules,
 )
@@ -122,6 +123,24 @@ def builtin_decisions() -> tuple[Decision, ...]:
             kind="noul",
             instructions="Is `text` a durable fact worth proposing to remember?",
             criteria={"true": "Stable personal or server fact", "false": "Chatter or one-off"},
+        ),
+        _decision(
+            "objective_request",
+            fallback=False,
+            threshold=0.7,
+            budget=300,
+            ttl=60,
+            rules=request_rules,
+            kind="noul",
+            instructions=(
+                "Is the author of `text` explicitly asking the bot to notify, ping, remind or "
+                "watch something for them? A remark, a reaction, a joke, a question, or merely "
+                "naming a topic is NOT a request."
+            ),
+            criteria={
+                "true": "They clearly ask to be warned, pinged, reminded or to have it watched",
+                "false": "A remark, chat, a question, or a topic named in passing",
+            },
         ),
         _decision(
             "fact_sensitivity",

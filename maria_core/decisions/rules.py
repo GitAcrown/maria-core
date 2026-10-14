@@ -117,6 +117,22 @@ def sensitivity_rules(state: Mapping[str, Any]) -> RuleHit | None:
     return RuleHit("sensitive", 1.0) if _SENSITIVE.search(_text(state, "text")) else None
 
 
+_REQUEST = re.compile(
+    r"pr[e\u00e9]vien|\bping|rappel|alert|notifi|mentionn|surveill|guett|[e\u00e9]cout[eo]|"
+    r"tiens?[- ]moi au courant|dis[- ]moi (?:quand|si|d[e\u00e8]s)|fais[- ]moi signe|"
+    r"pr[e\u00e9]viens|pr[e\u00e9]venir|avertis|signale[- ]moi",
+    re.IGNORECASE,
+)
+
+
+def request_rules(state: Mapping[str, Any]) -> RuleHit | None:
+    """Une demande de surveillance se reconnaît à ses mots ; trop court, ce n'en est pas une."""
+    text = _text(state, "text")
+    if len(text.strip()) < 8:
+        return RuleHit(False, 1.0)
+    return RuleHit(True, 1.0) if _REQUEST.search(text) else None
+
+
 def claim_rules(state: Mapping[str, Any]) -> RuleHit | None:
     """Sans chiffre ni repère de temps, ou déjà appuyée par un outil : rien à vérifier."""
     answer = _text(state, "answer")

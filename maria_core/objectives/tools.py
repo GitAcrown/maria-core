@@ -55,6 +55,15 @@ def objective_capabilities(service: Any) -> tuple[Capability, ...]:
 
 def _create(service: Any) -> Callable[[Context, Mapping[str, Any]], Any]:
     async def run(context: Context, args: Mapping[str, Any]) -> Result:
+        if not await _asked_for(service, context, args):
+            return Result(
+                ok=False,
+                data={},
+                error=(
+                    "La personne n'a pas demandé à être prévenue : ne crée rien. Si tu veux, "
+                    "propose-le-lui en une phrase."
+                ),
+            )
         try:
             objective, created = _build(service, context, args)
         except (ObjectiveQuota, ValueError) as exc:
@@ -98,6 +107,14 @@ def _build(service: Any, context: Context, args: Mapping[str, Any]) -> tuple[Obj
         origin_message_id=context.message_id,
         state={"spec": _spec(args)},
     )
+
+
+async def _asked_for(service: Any, context: Context, args: Mapping[str, Any]) -> bool:
+    """Une écoute ne naît que d'une demande claire, jamais d'une simple remarque."""
+    check = getattr(service, "is_request", None)
+    if check is None or str(args.get("trigger_type") or "") not in EVENT_TRIGGERS:
+        return True
+    return bool(await check(context.text))
 
 
 def _max_fires(trigger: Mapping[str, Any], args: Mapping[str, Any], repeat: bool) -> int | None:

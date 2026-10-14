@@ -1,6 +1,6 @@
 """Relie le stockage, le moteur et l'horloge. Discord branche le courrier plus tard."""
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from maria_core.db import Database
@@ -41,6 +41,7 @@ class Objectives:
             judge=judge,
         )
         self.matcher = Matcher(self.store, self.runner)
+        self.is_request: Callable[[str], Awaitable[bool]] | None = None
         self.scheduler = Scheduler(self.store, self.runner, clock=self._clock)
 
     @property

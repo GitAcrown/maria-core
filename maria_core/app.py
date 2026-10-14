@@ -77,6 +77,7 @@ class App:
         self.objectives.pipeline.searcher = brave_searcher(self.http, settings.brave_api_key)
         self.objectives.pipeline.picker = self._pick_price
         self.objectives.matcher.relevance = self._relevant
+        self.objectives.is_request = self._is_request
         self.events.subscribe(ObjectiveSignal, self.objectives.on_signal)
         self.channel_reader: ChannelReader | None = None
         self._discord_bound = False
@@ -174,6 +175,10 @@ class App:
             "condition_judge",
             {"condition": text, "evidence": evidence[:2000]},
         )
+        return verdict.value is True
+
+    async def _is_request(self, text: str) -> bool:
+        verdict = await self.engine.resolve("objective_request", {"text": text[:400]})
         return verdict.value is True
 
     async def _relevant(self, name: str, state: object) -> bool:
