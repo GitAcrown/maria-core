@@ -36,6 +36,7 @@ class Policy:
     mode: ReplyMode
     respond_everyone: bool = False
     auto_transcribe: bool = False
+    limit: str = "none"
 
 
 @dataclass(frozen=True, slots=True)

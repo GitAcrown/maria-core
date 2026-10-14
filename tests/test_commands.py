@@ -27,6 +27,7 @@ def test_the_default_voice_matches_the_old_one() -> None:
         "autotranscribe",
         "everyone",
         "forget",
+        "limite",
         "mode",
         "python",
         "spontaneite",

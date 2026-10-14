@@ -10,7 +10,7 @@ def load_policy(database: Database, message: Inbound) -> Policy:
     if message.guild_id is None:
         return Policy(mode=ReplyMode.STRICT)
     guild = database.fetchone(
-        "SELECT mode FROM guild_settings WHERE guild_id = ?",
+        "SELECT mode, reply_limit FROM guild_settings WHERE guild_id = ?",
         (message.guild_id,),
     )
     channel = database.fetchone(
@@ -24,6 +24,7 @@ def load_policy(database: Database, message: Inbound) -> Policy:
         mode=_mode(guild),
         respond_everyone=_flag(channel, "respond_everyone"),
         auto_transcribe=_flag(channel, "auto_transcribe"),
+        limit=_limit(guild),
     )
 
 
@@ -40,6 +41,29 @@ def save_mode(database: Database, guild_id: int, mode: str, now: str) -> str:
         (guild_id, chosen.value, now),
     )
     return chosen.value
+
+
+LIMITS = ("none", "normal", "strict")
+
+
+def save_limit(database: Database, guild_id: int, limit: str, now: str) -> None:
+    if limit not in LIMITS:
+        raise ValueError(f"Limite inconnue : {limit}.")
+    database.execute(
+        """
+        INSERT INTO guild_settings (guild_id, reply_limit, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(guild_id) DO UPDATE SET
+            reply_limit = excluded.reply_limit,
+            updated_at = excluded.updated_at
+        """,
+        (guild_id, limit, now),
+    )
+
+
+def _limit(row: sqlite3.Row | None) -> str:
+    value = "none" if row is None else str(row["reply_limit"] or "none")
+    return value if value in LIMITS else "none"
 
 
 def save_everyone(database: Database, channel_id: int, guild_id: int, enabled: bool) -> None:

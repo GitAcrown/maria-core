@@ -21,3 +21,33 @@ def test_the_reaction_budget_grows_with_the_room() -> None:
     assert room_budget(3, 1) == 3
     assert room_budget(3, 10) == 30
     assert room_budget(0, 10) == 0
+
+
+def _admit(
+    pressure: Pressure, *, limit: str, followup: bool, author: int = 4, room: int = 40
+) -> bool:
+    return pressure.admit(
+        7, 3, author_messages=author, channel_messages=room, limit=limit, followup=followup
+    )
+
+
+def test_no_limit_by_default_and_follow_ups_are_the_only_ones_held_back() -> None:
+    pressure = Pressure()
+    assert all(_admit(pressure, limit="none", followup=False, author=1) for _ in range(50))
+    # un suivi : au plus la moitié de ce que la personne écrit (4 messages -> 2 suivis)
+    assert [_admit(pressure, limit="none", followup=True) for _ in range(3)] == [True, True, False]
+
+
+def test_a_server_can_choose_to_limit_everyone() -> None:
+    normal = Pressure()
+    assert [_admit(normal, limit="normal", followup=False) for _ in range(5)] == [True] * 4 + [
+        False
+    ]
+    strict = Pressure()
+    assert [_admit(strict, limit="strict", followup=False) for _ in range(3)] == [True, True, False]
+
+
+def test_follow_ups_and_calls_do_not_eat_each_others_quota() -> None:
+    pressure = Pressure()
+    assert _admit(pressure, limit="normal", followup=True)
+    assert all(_admit(pressure, limit="normal", followup=False, author=3) for _ in range(3))
