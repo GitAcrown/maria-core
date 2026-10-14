@@ -18,6 +18,7 @@ from maria_core.discord.hub import (
     title,
     wide,
 )
+from maria_core.discord.task_edit import EditProgram
 from maria_core.objectives.labels import condition_text, kind_label, status_label
 from maria_core.objectives.model import Objective, ObjectiveQuota, StaleObjective
 from maria_core.objectives.schedule import describe
@@ -59,7 +60,9 @@ class TaskHub(Hub):
 
     def build(self) -> None:
         current = next((item for item in self.objectives if item.id == self.selected), None)
-        if current is None or self.screen == "catalog":
+        if self.screen == "wipe":
+            self._wipe()
+        elif current is None or self.screen == "catalog":
             self._catalog()
         elif self.screen == "confirm":
             self._confirm(current)
@@ -91,13 +94,16 @@ class TaskHub(Hub):
                 option(item.id, item.title, _plain_meta(item), _icon(item)) for item in shown
             ]
             rows.append(discord.ui.ActionRow(Picker("Ouvrir une tâche…", options, self._open)))
+        controls: list[discord.ui.Item] = []
         if total > 1:
-            rows.append(
-                discord.ui.ActionRow(
-                    Action("←", self._turn(-1), disabled=self.page == 0),
-                    Action("→", self._turn(1), disabled=self.page >= total - 1),
-                )
-            )
+            controls += [
+                Action("←", self._turn(-1), disabled=self.page == 0),
+                Action("→", self._turn(1), disabled=self.page >= total - 1),
+            ]
+        if self.objectives:
+            controls.append(Action("Tout supprimer", self._ask_wipe, style=_RED))
+        if controls:
+            rows.append(discord.ui.ActionRow(*controls))
         self.set_layout(content, *rows)
 
     def _meta(self, total: int) -> str:
@@ -127,8 +133,49 @@ class TaskHub(Hub):
             content += [thin(), body(f"-# {self.note}")]
         self.set_layout(content, discord.ui.ActionRow(*self._buttons(item)))
 
+    def _wipe(self) -> None:
+        count = len(self.objectives)
+        self.set_layout(
+            [
+                title("Tout supprimer ?", f"{count} programme(s)"),
+                wide(),
+                body(
+                    f"Supprimer **tous** tes programmes ({count}) ?\n"
+                    "-# Rappels, écoutes et surveillances inclus. Irréversible."
+                ),
+            ],
+            discord.ui.ActionRow(
+                Action("Oui, tout supprimer", self._confirm_wipe, style=_RED),
+                Action("Annuler", self._back),
+            ),
+        )
+
+    async def _ask_wipe(self, interaction: discord.Interaction) -> None:
+        self.screen = "wipe"
+        await self.refresh(interaction)
+
+    async def _confirm_wipe(self, interaction: discord.Interaction) -> None:
+        ids = [item.id for item in self.objectives]
+
+        def wipe() -> int:
+            done = 0
+            for objective_id in ids:
+                try:
+                    operate(self.app.objectives, self.user_id, objective_id, "cancel")
+                    done += 1
+                except (ValueError, StaleObjective):
+                    continue
+            return done
+
+        removed = await asyncio.to_thread(wipe)
+        await self.load()
+        self.screen, self.note = "catalog", f"{removed} programme(s) supprimé(s)."
+        await self.refresh(interaction)
+
     def _buttons(self, item: Objective) -> list[discord.ui.Item]:
         buttons: list[discord.ui.Item] = []
+        if item.status != "draft":
+            buttons.append(Action("Modifier", self._edit))
         if item.status == "draft":
             buttons.append(Action("Confirmer", self._run("confirm"), style=_GREEN))
         elif item.status == "paused":
@@ -185,6 +232,16 @@ class TaskHub(Hub):
         await self.load()
         self.note = _DONE.get(op, "C'est fait.")
         self.screen = "catalog" if op == "cancel" else "detail"
+        await self.refresh(interaction)
+
+    async def _edit(self, interaction: discord.Interaction) -> None:
+        item = next((entry for entry in self.objectives if entry.id == self.selected), None)
+        if item is not None:
+            await interaction.response.send_modal(EditProgram(self.app, item, self._edited))
+
+    async def _edited(self, interaction: discord.Interaction, note: str) -> None:
+        await self.load()
+        self.screen, self.note = "detail", note
         await self.refresh(interaction)
 
     async def _open(self, interaction: discord.Interaction, value: str) -> None:

@@ -50,6 +50,7 @@ def youtube_capability(http: HttpClient) -> Capability:
             "required": ["url"],
         },
         risk=Risk.EXTERNAL,
+        cache_s=3600,
         run=run,
     )
 

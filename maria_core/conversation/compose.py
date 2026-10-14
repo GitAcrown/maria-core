@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from maria_core.llm.clean import clean_reply, silence_marks
 from maria_core.llm.loop import LoopResult, ToolRecord
-from maria_core.ui.widgets import Card, WidgetRegistry, show
+from maria_core.ui.widgets import Card, WidgetRegistry, gallery, show
 
 UNAVAILABLE_TEXT = "Je n'arrive pas à répondre pour l'instant, réessaie dans un moment."
 
@@ -41,6 +41,7 @@ _LABELS = {
     "forget_fact": ("Oublié", ""),
 }
 _NOTE_CHARS = 360
+_MERGED_IMAGES = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +69,27 @@ def compose(outcome: LoopResult, widgets: WidgetRegistry, bot_names: tuple[str, 
             notes.append(note)
     footer = _footer(outcome.records)
     body = "\n\n".join(part for part in parts if part).strip()
-    return Composed(body, tuple(cards), footer, tuple(notes), react, skip, bool(footer))
+    return Composed(
+        body, tuple(_merge_galleries(cards)), footer, tuple(notes), react, skip, bool(footer)
+    )
+
+
+def _merge_galleries(cards: list[Card]) -> list[Card]:
+    """Plusieurs search_images dans le même tour : une seule galerie, comme dans MARIA_R."""
+    loose = [item for item in cards if _is_gallery(item)]
+    if len(loose) < 2:
+        return cards
+    urls = [url for item in loose for url in item.blocks[0].urls][:_MERGED_IMAGES]
+    captions = {label_url: label for item in loose for label, label_url in item.blocks[0].pairs}
+    merged = Card((gallery(urls, captions),), None, True)
+    kept = [item for item in cards if not _is_gallery(item)]
+    first = next(index for index, item in enumerate(cards) if _is_gallery(item))
+    kept.insert(min(first, len(kept)), merged)
+    return kept
+
+
+def _is_gallery(item: Card) -> bool:
+    return item.bare and len(item.blocks) == 1 and item.blocks[0].kind == "gallery"
 
 
 def _record(

@@ -13,6 +13,7 @@ from discord.ext import commands
 
 from maria_core import __version__
 from maria_core.app import App
+from maria_core.discord.hub import say
 from maria_core.errors import PluginError
 
 logger = logging.getLogger(__name__)
@@ -76,13 +77,14 @@ class OwnerCommands(commands.Cog):
         """Version, base et extensions chargées."""
         app = _app(self.bot)
         names = ", ".join(app.plugins.names) or "aucune"
-        await ctx.send(
-            f"maria-core `{__version__}`\n"
-            f"Disponibilité : {_uptime(self.bot)}\n"
-            f"Base : v{app.database.version}\n"
-            f"Extensions : {names}\n"
-            f"Serveurs : {len(self.bot.guilds)}"
-        )
+        lines = [
+            f"**Disponibilité** · {_uptime(self.bot)}",
+            f"**Latence** · {round(self.bot.latency * 1000)} ms",
+            f"**Base** · v{app.database.version}",
+            f"**Serveurs** · {len(self.bot.guilds)}",
+            f"**Extensions** · {names}",
+        ]
+        await say(ctx, "MARIA", "\n".join(lines), meta=f"maria-core {__version__}")
 
     @commands.command(name="restart")
     @commands.is_owner()
@@ -131,17 +133,16 @@ class OwnerCommands(commands.Cog):
     async def keys(self, ctx: commands.Context) -> None:
         """Clés de configuration présentes ou manquantes, masquées."""
         settings = _app(self.bot).settings
-        lines = ["Clés :"]
-        for name, value in _keys(settings):
-            lines.append(f"- `{name}` : {_mask(value)}")
-        await ctx.send("\n".join(lines))
+        rows = [f"`{name}` · {_mask(value)}" for name, value in _keys(settings)]
+        await say(ctx, "Clés", "\n".join(rows), meta="valeurs masquées")
 
     @commands.group(name="plugin", invoke_without_command=True)
     @commands.is_owner()
     async def plugin(self, ctx: commands.Context) -> None:
         """Liste les extensions chargées."""
-        names = ", ".join(_app(self.bot).plugins.names) or "aucune"
-        await ctx.send(f"Extensions : {names}")
+        names = _app(self.bot).plugins.names
+        listed = "\n".join(f"`{name}`" for name in names) or "*Aucune extension chargée.*"
+        await say(ctx, "Extensions", listed, meta=f"{len(names)} chargée(s)")
 
     @plugin.command(name="load")
     @commands.is_owner()
@@ -152,7 +153,7 @@ class OwnerCommands(commands.Cog):
         except PluginError as exc:
             await ctx.send(f"Chargement impossible : {exc}")
             return
-        await ctx.send(f"Extension `{name}` chargée.")
+        await say(ctx, "Extension chargée", f"`{name}`")
 
     @plugin.command(name="unload")
     @commands.is_owner()
@@ -163,7 +164,7 @@ class OwnerCommands(commands.Cog):
         except PluginError as exc:
             await ctx.send(f"Déchargement impossible : {exc}")
             return
-        await ctx.send(f"Extension `{name}` déchargée.")
+        await say(ctx, "Extension déchargée", f"`{name}`")
 
     @plugin.command(name="reload")
     @commands.is_owner()
@@ -174,7 +175,7 @@ class OwnerCommands(commands.Cog):
         except PluginError as exc:
             await ctx.send(f"Rechargement impossible : {exc}")
             return
-        await ctx.send(f"Extension `{loaded}` rechargée.")
+        await say(ctx, "Extension rechargée", f"`{loaded}`")
 
     @commands.command(name="sync")
     @commands.guild_only()
@@ -208,7 +209,7 @@ class OwnerCommands(commands.Cog):
                 logger.warning("Synchronisation impossible pour le serveur %s", guild.id)
             else:
                 done += 1
-        await ctx.send(f"Arbre synchronisé dans {done}/{len(guilds)} serveur(s).")
+        await say(ctx, "Commandes synchronisées", f"{done}/{len(guilds)} serveur(s).")
 
     async def _sync_one(self, ctx: commands.Context, spec: Literal["~", "*", "^"] | None) -> None:
         guild = ctx.guild
@@ -221,8 +222,8 @@ class OwnerCommands(commands.Cog):
         else:
             synced = await _sync_guild(ctx, guild, spec)
             scope = f"sur {guild.name}"
-        rendered = ", ".join(f"`{command.name}`" for command in synced) if synced else "—"
-        await ctx.send(f"{len(synced)} commande(s) synchronisée(s) ({scope}) : {rendered}")
+        rendered = "\n".join(f"`/{command.name}`" for command in synced) or "*Aucune.*"
+        await say(ctx, "Commandes synchronisées", rendered, meta=f"{len(synced)} · {scope}")
 
 
 async def _sync_guild(

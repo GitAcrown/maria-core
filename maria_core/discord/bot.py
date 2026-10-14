@@ -9,10 +9,10 @@ from discord.ext import commands
 
 from maria_core.app import App
 from maria_core.discord.chat import ChatCog
-from maria_core.discord.commands.memory import MemoryCommands
 from maria_core.discord.commands.owner import OwnerCommands
 from maria_core.discord.commands.public import PublicCommands
 from maria_core.discord.commands.social import SocialCommands
+from maria_core.discord.commands.usage import UsageCommands
 from maria_core.discord.directory import DiscordDirectory
 from maria_core.discord.draft_view import restore_drafts
 from maria_core.discord.layout import use_emojis
@@ -29,6 +29,40 @@ from maria_core.ui.emojis import FALLBACKS, emoji_id
 logger = logging.getLogger(__name__)
 
 _HOUSEKEEPING_SECONDS = 6 * 3600
+
+
+async def on_app_command_error(
+    interaction: discord.Interaction, error: discord.app_commands.AppCommandError
+) -> None:
+    """Une commande slash ne reste jamais sans réponse : message clair, jamais d'exception brute."""
+    if isinstance(error, discord.app_commands.CommandOnCooldown):
+        text = f"**Cooldown ·** Réessaie dans {_delay(error.retry_after)}."
+    elif isinstance(error, discord.app_commands.MissingPermissions):
+        missing = ", ".join(f"`{item}`" for item in error.missing_permissions)
+        text = f"**Action impossible ·** Permission manquante : {missing}."
+    elif isinstance(error, discord.app_commands.CheckFailure):
+        text = "**Action impossible ·** Tu ne peux pas utiliser cette commande ici."
+    else:
+        logger.error("Commande slash en échec", exc_info=error)
+        text = "**Erreur ·** Une erreur est survenue, réessaie dans un instant."
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(text, ephemeral=True)
+        else:
+            await interaction.response.send_message(text, ephemeral=True, delete_after=20)
+    except discord.HTTPException:
+        logger.debug("Erreur de commande non signalée", exc_info=True)
+
+
+def _delay(seconds: float) -> str:
+    minutes, secs = divmod(round(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    parts = [
+        f"{hours} h" if hours else "",
+        f"{minutes} min" if minutes else "",
+        f"{secs} s" if secs else "",
+    ]
+    return " ".join(part for part in parts if part) or "quelques instants"
 
 
 def build_intents() -> discord.Intents:
@@ -53,6 +87,7 @@ class MariaBot(commands.Bot):
         self.started_at = datetime.now(UTC)
         self._objectives_task: asyncio.Task[None] | None = None
         self._housekeeping_task: asyncio.Task[None] | None = None
+        self.tree.on_error = on_app_command_error
 
     async def setup_hook(self) -> None:
         app = self.app
@@ -74,10 +109,10 @@ class MariaBot(commands.Bot):
             OwnerCommands(self),
             ChatCog(self, app),
             VoiceCog(self, app),
-            MemoryCommands(self),
             SignalCog(self, app),
             reactions,
             SocialCommands(self),
+            UsageCommands(self, app),
             PublicCommands(self),
             PresenceCog(self, app.settings.data_dir / "statuses.txt"),
         ):

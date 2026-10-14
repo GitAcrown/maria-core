@@ -52,6 +52,7 @@ def weather_capability(http: HttpClient, api_key: str) -> Capability:
             "required": ["city", "type"],
         },
         risk=Risk.EXTERNAL,
+        cache_s=600,
         run=run,
         requires=frozenset({"OPENWEATHERMAP_API_KEY"}),
     )

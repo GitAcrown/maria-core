@@ -54,6 +54,7 @@ def track_capability(http: HttpClient, client_id: str, secret: str) -> Capabilit
             "required": ["query"],
         },
         risk=Risk.EXTERNAL,
+        cache_s=3600,
         run=run,
         requires=frozenset({"SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET"}),
     )

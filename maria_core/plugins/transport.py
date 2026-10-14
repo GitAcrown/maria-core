@@ -77,6 +77,7 @@ def transport_capability(http: HttpClient, settings: Settings) -> Capability:
             "required": [],
         },
         risk=Risk.EXTERNAL,
+        cache_s=45,
         run=run,
         requires_any=frozenset({"PRIM_API_KEY", "SNCF_API_KEY"}),
     )

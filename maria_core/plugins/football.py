@@ -50,6 +50,7 @@ def football_capability(http: HttpClient, api_key: str = "") -> Capability:
             "required": [],
         },
         risk=Risk.EXTERNAL,
+        cache_s=45,
         run=run,
     )
 

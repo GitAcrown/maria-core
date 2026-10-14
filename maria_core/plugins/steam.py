@@ -67,6 +67,7 @@ def game_capability(http: HttpClient) -> Capability:
             "required": ["query"],
         },
         risk=Risk.EXTERNAL,
+        cache_s=3600,
         run=run,
     )
 

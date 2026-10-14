@@ -43,13 +43,13 @@ Slash (après `5!sync`) :
 
 | Commande | Rôle |
 |---|---|
-| `/moi`, `/global` | Souvenirs, propositions, oublier, annuler une modification |
-| `/programmes` | Rappels, écoutes et surveillances : pause, reprise, saut, confirmation, suppression |
+| `/moi`, `/global` | Résumé de ce que MARIA sait, souvenirs, propositions, modifier, oublier, tout effacer |
+| `/programmes` | Rappels, écoutes et surveillances : modifier, pause, reprise, saut, confirmation, suppression, tout supprimer |
 | `/info` | Réglages du salon et outils disponibles |
 | `/chatbot mode\|forget\|everyone\|autotranscribe\|python\|spontaneite` | Réglages, modérateurs |
 | `/preferences propositions\|reactions` | Réglages personnels |
 
-Préfixe (`5!` par défaut) : `spontaneite`, `moi`, `global`. Propriétaire : `why <lien>`, `status`, `keys`, `presence`, `plugin load|unload|reload`, `sync`, `update`, `restart`, `shutdown`.
+Préfixe (`5!` par défaut) : `spontaneite`. Propriétaire : `why <lien>`, `status`, `usage [jours]`, `keys`, `presence`, `plugin load|unload|reload`, `sync`, `update`, `restart`, `shutdown`.
 
 ## Import depuis MARIA_R
 
