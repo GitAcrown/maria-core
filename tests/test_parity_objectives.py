@@ -294,3 +294,90 @@ def _inbound(text: str) -> Inbound:
         author_is_owner=False,
         author_is_moderator=False,
     )
+
+
+def test_a_listening_trigger_keeps_only_the_distinctive_name() -> None:
+    trigger = compile_trigger(
+        {
+            "trigger_type": "on_topic",
+            "pattern": "le film « Le corset », Corset",
+            "topic": "le film « Le Corset »",
+        },
+        _types(),
+        now=_NOW,
+    )
+    assert trigger["pattern"] == "corset"
+    assert trigger["aliases"] == ["Corset"]
+    assert trigger["topic"] == "le film Le Corset"
+    assert word_in("Le Corset est un film sur la scoliose", "corset")
+    misérables = compile_trigger(
+        {"trigger_type": "on_topic", "pattern": "Les Misérables"}, _types()
+    )
+    assert misérables["pattern"] == "Misérables"
+
+
+async def test_a_draft_is_still_confirmed_by_a_plain_message_hours_later(tmp_path: Path) -> None:
+    clock = [_NOW]
+    service, database, _courier = _open(tmp_path, clock)
+    data = await _create(
+        service,
+        tmp_path,
+        title="Le Corset",
+        trigger_type="on_topic",
+        pattern="le film « Le corset »",
+        action_type="alert",
+        text="Quelqu'un parle du film Le Corset",
+    )
+    assert data["status"] == "draft"
+    clock[0] = _NOW + timedelta(hours=2)
+    drafts = Drafts(service, _Engine("accept"))
+    assert await drafts.answer(_inbound("oui")) is True
+    assert service.store.get(int(str(data["id"]))).status == "active"
+    database.close()
+
+
+async def test_a_forgotten_draft_stops_listening_after_a_while(tmp_path: Path) -> None:
+    clock = [_NOW]
+    service, database, _courier = _open(tmp_path, clock)
+    await _create(
+        service,
+        tmp_path,
+        title="Ranked",
+        trigger_type="on_topic",
+        pattern="ranked",
+        action_type="alert",
+        text="ça parle de ranked",
+    )
+    clock[0] = _NOW + timedelta(hours=5)
+    assert await Drafts(service, _Engine("accept")).answer(_inbound("oui")) is False
+    database.close()
+
+
+async def test_the_alert_names_who_spoke_not_who_asked(tmp_path: Path) -> None:
+    clock = [_NOW]
+    service, database, courier = _open(tmp_path, clock)
+    service.store.create(
+        owner_id=7,
+        guild_id=5,
+        channel_ids=(3,),
+        deliver="channel",
+        title="Corset",
+        trigger={"type": "on_topic", "pattern": "corset"},
+        condition=None,
+        action={"type": "alert", "text": "Quelqu'un parle du film Le Corset"},
+        now=clock[0],
+    )
+    signal = ObjectiveSignal(
+        kind="message",
+        key="message:9",
+        channel_id=3,
+        guild_id=5,
+        user_id=8,
+        text="Le corset est un film sur la scoliose",
+        author_name="Léa",
+    )
+    assert await service.matcher.handle(signal, now=clock[0]) == 1
+    assert courier.sent[0].text == (
+        "Quelqu'un parle du film Le Corset\n> **Léa** : Le corset est un film sur la scoliose"
+    )
+    database.close()

@@ -40,9 +40,13 @@ GUIDE = (
     "Prix seulement : price_below/price_above + threshold, price_drop + threshold en %, "
     "price_lower/price_higher = par rapport au passage précédent. Judge hors page : "
     "condition_when=before juge le déclencheur (le message) avant l'action.\n"
-    "- Écoute : on_topic avec pattern (mot cité, variantes séparées par des virgules) ou topic "
-    "(sujet flou). « quand JE dis » → author=self. Vocal : on_voice + voice_event "
+    "- Écoute : on_topic avec pattern = le nom distinctif SEUL (« corset » pour le film « Le "
+    "Corset » : sans « le film », sans article, sans guillemets ; variantes après des virgules) "
+    "ou topic (sujet flou). « quand JE dis » → author=self. Vocal : on_voice + voice_event "
     "(join/leave/stream) + target_user_id. Une fois par défaut ; repeat=true pour chaque fois.\n"
+    "- text s'adresse à la PERSONNE QUI DEMANDE (« tu »), jamais à propos d'elle : ne cite pas "
+    "son nom. Pour une écoute, c'est quelqu'un d'autre qui parlera : « Quelqu'un parle du film Le "
+    "Corset » (le message est cité dessous). Pour un rappel : « Tu devais sortir le chien ».\n"
     "- N'invente ni nombre d'alertes ni durée, ne demande pas « combien de fois ». "
     "Un brouillon part après un oui : objective_update op=confirm. Ajustement : op=modify."
 )
@@ -55,7 +59,10 @@ def create_schema() -> dict[str, Any]:
             "title": {"type": "string", "description": "Titre court et distinctif"},
             "trigger_type": {"type": "string", "enum": TRIGGERS},
             "action_type": {"type": "string", "enum": ACTIONS},
-            "text": {"type": "string", "description": "Message à envoyer, ou consigne du récap"},
+            "text": {
+                "type": "string",
+                "description": "Message pour LA PERSONNE QUI DEMANDE (tu), ou consigne du récap",
+            },
             **_fields(),
         },
         "required": ["title", "trigger_type", "action_type"],

@@ -171,7 +171,8 @@ def _objective_label(record: ToolRecord) -> str:
         return f"**{kind}** · {done}" if done else f"**{kind}**"
     title = _clip(str(data.get("title") or record.arguments.get("title") or ""))
     when = str(data.get("when") or "")
-    tail = f" · {when}" if when and data.get("status") != "draft" else ""
+    draft = data.get("status") == "draft"
+    tail = " · réponds « oui » ou « non »" if draft else (f" · {when}" if when else "")
     return f"**{kind}** · « {title} »{tail}" if title else f"**{kind}**"
 
 

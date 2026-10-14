@@ -14,7 +14,6 @@ from maria_core.discord.commands.public import PublicCommands
 from maria_core.discord.commands.social import SocialCommands
 from maria_core.discord.commands.usage import UsageCommands
 from maria_core.discord.directory import DiscordDirectory
-from maria_core.discord.draft_view import restore_drafts
 from maria_core.discord.layout import use_emojis
 from maria_core.discord.learned_view import restore_learned
 from maria_core.discord.memory_view import restore_proposals
@@ -98,7 +97,6 @@ class MariaBot(commands.Bot):
             reader=DiscordHistory(self),
         )
         restore_proposals(self, app.memory.store.restorable())
-        restore_drafts(self, app)
         restore_learned(self, app)
         app.objectives.runner.courier = DiscordCourier(self)
         reactions = ReactionCog(self, app)

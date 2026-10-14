@@ -58,6 +58,8 @@ CONSIGNE (rien d'autre) :
   Ville ou détail absent : regarde le PROFIL du destinataire.
 - Condition dans la consigne : vérifie-la d'abord. Fausse ou preuve insuffisante → ta réponse est
   exactement [[SILENCE]].
+- Tu t'adresses à la personne qui a demandé cet objectif (le DESTINATAIRE), jamais à
+  l'auteur d'un message qui l'a déclenché : parle de lui à la 3e personne, sans les confondre.
 - Tutoiement, sans emoji, sans commencer par ton nom.
 {runs}{profile}
 CONTEXTE :
