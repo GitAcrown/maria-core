@@ -85,7 +85,6 @@ VISUAL_ICONS = {
     "diagram": "🧭",
     "qr": "🔳",
     "math": "➗",
-    "avatar": "🧑‍🎨",
 }
 
 KIND_ICONS = {
