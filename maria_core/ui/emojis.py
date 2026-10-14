@@ -79,6 +79,15 @@ SLOT_ICONS = {
     "emoji": "😀",
 }
 
+VISUAL_ICONS = {
+    "chart": "📊",
+    "plot": "📈",
+    "diagram": "🧭",
+    "qr": "🔳",
+    "math": "➗",
+    "avatar": "🧑‍🎨",
+}
+
 KIND_ICONS = {
     "Rappel": SMALL_TASK,
     "Rappel récurrent": REPEAT_REMINDER,

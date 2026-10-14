@@ -5,6 +5,7 @@ from typing import Protocol
 
 from maria_core.capabilities import CapabilityRegistry
 from maria_core.capabilities.builtin.about import about_capability
+from maria_core.capabilities.builtin.fun import fun_capabilities, render_clock
 from maria_core.capabilities.builtin.layout import (
     layout_capabilities,
     render_draft,
@@ -13,6 +14,7 @@ from maria_core.capabilities.builtin.layout import (
 )
 from maria_core.capabilities.builtin.python_tool import python_capability
 from maria_core.capabilities.builtin.summary import Condense, summary_capability
+from maria_core.capabilities.builtin.visuals import render_visual, visual_capabilities
 from maria_core.capabilities.builtin.web import render_images, web_capabilities
 from maria_core.capabilities.http import HttpClient
 from maria_core.capabilities.ports import ChannelReader
@@ -70,6 +72,10 @@ def register_builtins(app: BuiltinHost, condense: Condense | None = None) -> Non
         app.capabilities.register(capability)
     for capability in layout_capabilities():
         app.capabilities.register(capability)
+    for capability in (*visual_capabilities(app.http), *fun_capabilities(app.http)):
+        app.capabilities.register(capability)
+    app.widgets.register("render_visual", render_visual)
+    app.widgets.register("render_clock", render_clock)
     app.widgets.register("search_images", render_images)
     app.widgets.register("render_widget", render_widget)
     app.widgets.register("render_table", render_table)
