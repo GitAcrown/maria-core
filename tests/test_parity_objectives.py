@@ -299,20 +299,22 @@ def test_a_listening_trigger_keeps_only_the_distinctive_name() -> None:
     trigger = compile_trigger(
         {
             "trigger_type": "on_topic",
-            "pattern": "le film « Le corset », Corset",
+            "pattern": "le film « Le corset », au corset",
             "topic": "le film « Le Corset »",
         },
         _types(),
         now=_NOW,
     )
-    assert trigger["pattern"] == "corset"
-    assert trigger["aliases"] == ["Corset"]
+    assert trigger["pattern"] == "Le corset"
+    assert trigger["aliases"] == ["au corset"]
     assert trigger["topic"] == "le film Le Corset"
-    assert word_in("Le Corset est un film sur la scoliose", "corset")
+    assert word_in("Le Corset est un film sur la scoliose", "Le corset")
+    assert not word_in("Elle porte un corset de grossesse", "Le corset")
+    assert not word_in("corset", "Le corset")
     misérables = compile_trigger(
         {"trigger_type": "on_topic", "pattern": "Les Misérables"}, _types()
     )
-    assert misérables["pattern"] == "Misérables"
+    assert misérables["pattern"] == "Les Misérables"
 
 
 async def test_a_draft_is_confirmed_by_a_plain_message_within_a_few_minutes(tmp_path: Path) -> None:
@@ -465,4 +467,42 @@ async def test_a_listening_objective_is_not_created_from_a_remark(tmp_path: Path
     reminder |= {"text": "Sors le chien"}
     assert (await create("dans 5 min sors le chien", **reminder)).ok
     assert asked == ["ah oui le film LE CORSET", "préviens-moi si on parle du Corset"]
+    database.close()
+
+
+async def test_a_listening_phrase_is_checked_by_the_judge_before_it_fires(tmp_path: Path) -> None:
+    clock = [_NOW]
+    service, database, courier = _open(tmp_path, clock)
+    service.store.create(
+        owner_id=7,
+        guild_id=5,
+        channel_ids=(3,),
+        deliver="channel",
+        title="Corset",
+        trigger={"type": "on_topic", "pattern": "Le corset"},
+        condition=None,
+        action={"type": "alert", "text": "Quelqu'un parle du film"},
+        now=clock[0],
+        max_fires=1,
+    )
+    asked: list[tuple[str, dict[str, object]]] = []
+    answers = [False, True]
+
+    async def relevance(name: str, state: dict[str, object]) -> bool:
+        asked.append((name, dict(state)))
+        return answers.pop(0)
+
+    service.matcher.relevance = relevance
+
+    def signal(key: str, text: str) -> ObjectiveSignal:
+        return ObjectiveSignal(
+            kind="message", key=key, channel_id=3, guild_id=5, user_id=8, text=text
+        )
+
+    assert await service.matcher.handle(signal("m:1", "un corset de grossesse"), now=clock[0]) == 0
+    assert asked == []  # « corset » seul : la phrase n'est pas là, le juge n'est même pas appelé
+    assert await service.matcher.handle(signal("m:2", "le corset de ma soeur"), now=clock[0]) == 0
+    assert [name for name, _ in asked] == ["listen_relevance"]
+    assert await service.matcher.handle(signal("m:3", "j'ai vu Le Corset hier"), now=clock[0]) == 1
+    assert len(courier.sent) == 1
     database.close()

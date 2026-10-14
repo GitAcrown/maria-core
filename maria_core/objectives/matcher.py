@@ -44,7 +44,10 @@ class Matcher:
         return fired
 
     async def _relevant(self, objective: Objective, signal: ObjectiveSignal) -> bool:
-        """Un sujet, ou un mot seul ambigu, passe par un juge. Sans juge : le mot suffit."""
+        """Le mot ne suffit pas : JEV vérifie que le message parle bien du sujet voulu.
+
+        Sans juge disponible, le mot (ou la phrase) cité suffit.
+        """
         trigger = objective.trigger
         if str(trigger.get("type")) != "on_topic" or self.relevance is None:
             return True
@@ -52,8 +55,6 @@ class Matcher:
         if topic:
             return await self.relevance("topic_match", {"topic": topic, "message": signal.text})
         pattern = str(trigger.get("pattern") or "")
-        if " " in pattern.strip():
-            return True
         return await self.relevance(
             "listen_relevance", {"pattern": pattern, "message": signal.text[:500]}
         )
