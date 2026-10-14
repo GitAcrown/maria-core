@@ -7,9 +7,11 @@ mal écrit, formule invalide) renvoie son message à MARIA, qui corrige et rées
 
 import base64
 import json
+import re
 import urllib.parse
 import zlib
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from maria_core.capabilities.base import Capability, Context, Result, Risk
@@ -37,6 +39,60 @@ PALETTE = (
     "#bab0ac",
 )
 _ROUND = frozenset({"pie", "doughnut", "polarArea"})
+_RADIAL = frozenset({"radar", "polarArea"})
+_COLOR = re.compile(r"^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20})$")
+THEMES = ("light", "dark", "transparent")
+
+
+@dataclass(frozen=True, slots=True)
+class Look:
+    """Fond, texte et grille d'une image. « transparent » suppose un Discord sombre."""
+
+    name: str
+    background: str
+    text: str
+    grid: str
+
+
+_LOOKS = {
+    "light": Look("light", "white", "#222222", "#d9d9d9"),
+    "dark": Look("dark", "#2b2d31", "#f2f3f5", "#4e5058"),
+    "transparent": Look("transparent", "transparent", "#f2f3f5", "#80848e"),
+}
+
+
+def look_of(theme: object) -> Look:
+    return _LOOKS.get(str(theme or "light"), _LOOKS["light"])
+
+
+def palette_of(colors: object) -> tuple[str, ...]:
+    """Les couleurs demandées d'abord, puis la palette par défaut pour compléter."""
+    asked = [str(item).strip() for item in colors or [] if str(item).strip()][:10]
+    for item in asked:
+        if not _COLOR.match(item):
+            raise ValueError(f"Couleur illisible : {item}. Écris red, #ff8800…")
+    return (*asked, *PALETTE)
+
+
+def look_options(kind: str, look: Look) -> dict[str, Any]:
+    """Texte, légende et grilles dans les couleurs du thème, pour rester lisible."""
+    options: dict[str, Any] = {
+        "legend": {"labels": {"fontColor": look.text}},
+        "title": {"fontColor": look.text},
+    }
+    if kind in _RADIAL:
+        options["scale"] = {
+            "ticks": {"fontColor": look.text, "backdropColor": "transparent"},
+            "gridLines": {"color": look.grid},
+            "angleLines": {"color": look.grid},
+            "pointLabels": {"fontColor": look.text},
+        }
+    elif kind not in _ROUND:
+        axis = {"ticks": {"fontColor": look.text}, "gridLines": {"color": look.grid}}
+        options["scales"] = {"xAxes": [axis], "yAxes": [axis]}
+    return options
+
+
 CHART_TYPES = ("bar", "horizontalBar", "line", "pie", "doughnut", "radar", "polarArea")
 DIAGRAMS = ("mermaid", "graphviz", "plantuml")
 _SERVICES = {
@@ -93,14 +149,14 @@ async def verify(http: HttpClient, url: str) -> str:
     return f"Le service a refusé l'image (HTTP {response.status}){why}"
 
 
-async def chart_url(http: HttpClient, config: Mapping[str, Any]) -> str:
+async def chart_url(http: HttpClient, config: Mapping[str, Any], background: str = "white") -> str:
     """Adresse courte d'un graphique Chart.js ; lève ValueError avec le message du service."""
     body = json.dumps(
         {
             "chart": config,
             "width": 720,
             "height": 420,
-            "backgroundColor": "white",
+            "backgroundColor": background,
             "format": "png",
             "version": "2",
         }
@@ -126,7 +182,7 @@ def _chart(http: HttpClient) -> Callable[[Context, Mapping[str, Any]], Any]:
     async def run(_context: Context, args: Mapping[str, Any]) -> Result:
         try:
             config = chart_config(args)
-            url = await chart_url(http, config)
+            url = await chart_url(http, config, look_of(args.get("theme")).background)
         except ValueError as exc:
             return Result(ok=False, data={}, error=str(exc))
         return shown("chart", str(args.get("title") or "").strip(), url)
@@ -140,29 +196,30 @@ def chart_config(args: Mapping[str, Any]) -> dict[str, Any]:
     datasets = [item for item in args["datasets"] if isinstance(item, Mapping)][:4]
     if not labels or not datasets:
         raise ValueError("Il faut des étiquettes (labels) et au moins une série (datasets).")
-    built = [_dataset(kind, index, item, len(labels)) for index, item in enumerate(datasets)]
+    colors = palette_of(args.get("colors"))
+    built = [
+        _dataset(kind, index, item, len(labels), colors) for index, item in enumerate(datasets)
+    ]
     title = str(args.get("title") or "").strip()
-    return {
-        "type": kind,
-        "data": {"labels": labels, "datasets": built},
-        "options": {
-            "title": {"display": bool(title), "text": title, "fontSize": 18},
-            "legend": {"display": len(built) > 1 or kind in _ROUND},
-        },
-    }
+    options = look_options(kind, look_of(args.get("theme")))
+    options["title"] |= {"display": bool(title), "text": title, "fontSize": 18}
+    options["legend"]["display"] = len(built) > 1 or kind in _ROUND
+    return {"type": kind, "data": {"labels": labels, "datasets": built}, "options": options}
 
 
-def _dataset(kind: str, index: int, raw: Mapping[str, Any], count: int) -> dict[str, Any]:
+def _dataset(
+    kind: str, index: int, raw: Mapping[str, Any], count: int, colors: tuple[str, ...]
+) -> dict[str, Any]:
     values = [_number(item) for item in raw.get("data") or []]
     if len(values) != count:
         raise ValueError(
             f"La série « {raw.get('label')} » a {len(values)} valeurs pour {count} étiquettes."
         )
-    color = PALETTE[index % len(PALETTE)]
+    color = colors[index % len(colors)]
     built: dict[str, Any] = {"label": str(raw.get("label") or f"Série {index + 1}")[:40]}
     built["data"] = values
     if kind in _ROUND:
-        built["backgroundColor"] = [PALETTE[i % len(PALETTE)] for i in range(count)]
+        built["backgroundColor"] = [colors[i % len(colors)] for i in range(count)]
     elif kind in {"line", "radar"}:
         built.update(borderColor=color, backgroundColor=color + "33", fill=kind == "radar")
     else:
@@ -180,7 +237,7 @@ def _diagram(http: HttpClient) -> Callable[[Context, Mapping[str, Any]], Any]:
     async def run(_context: Context, args: Mapping[str, Any]) -> Result:
         kind, code = str(args["kind"]), str(args["code"]).strip()
         try:
-            url = diagram_url(kind, code)
+            url = diagram_url(kind, code, look_of(args.get("theme")))
         except ValueError as exc:
             return Result(ok=False, data={}, error=str(exc))
         problem = await verify(http, url)
@@ -192,20 +249,72 @@ def _diagram(http: HttpClient) -> Callable[[Context, Mapping[str, Any]], Any]:
     return run
 
 
-def diagram_url(kind: str, code: str) -> str:
+def diagram_url(kind: str, code: str, look: Look | None = None) -> str:
     if kind not in DIAGRAMS:
         raise ValueError(f"Type de diagramme inconnu : {kind}. Au choix : {', '.join(DIAGRAMS)}.")
     if not code:
         raise ValueError("Diagramme vide.")
-    data = code.encode("utf-8")
+    look = look or _LOOKS["light"]
     if kind == "mermaid":
-        url = _MERMAID + base64.urlsafe_b64encode(data).decode() + "?type=png&bgColor=white"
+        data = code.encode("utf-8")
+        url = _MERMAID + base64.urlsafe_b64encode(data).decode() + _mermaid_style(look)
     else:
-        packed = base64.urlsafe_b64encode(zlib.compress(data, 9)).decode()
+        styled = (_graphviz_style if kind == "graphviz" else _plantuml_style)(code, look)
+        packed = base64.urlsafe_b64encode(zlib.compress(styled.encode("utf-8"), 9)).decode()
         url = _KROKI.format(kind=kind) + packed
     if len(url) > _URL_LIMIT:
         raise ValueError("Diagramme trop gros : simplifie-le (moins de nœuds ou de texte).")
     return url
+
+
+def _mermaid_style(look: Look) -> str:
+    """mermaid.ink : sans bgColor le fond est transparent ; « ! » devant un nom de couleur."""
+    if look.name == "dark":
+        return "?type=png&theme=dark&bgColor=2b2d31"
+    if look.name == "transparent":
+        return "?type=png&theme=dark"
+    return "?type=png&theme=default&bgColor=!white"
+
+
+def _graphviz_style(code: str, look: Look) -> str:
+    """Fond, texte et traits du thème, posés avant le dessin de la personne (qui reste maître)."""
+    if "{" not in code:
+        return code
+    line = (
+        f' bgcolor="{look.background}"; fontcolor="{look.text}";'
+        f' node [fontcolor="{look.text}", color="{look.text}"];'
+        f' edge [fontcolor="{look.text}", color="{look.text}"]; '
+    )
+    head, _, rest = code.partition("{")
+    return f"{head}{{{line}{rest}"
+
+
+def _plantuml_style(code: str, look: Look) -> str:
+    if look.name == "light":
+        return code
+    skin = [
+        f"skinparam backgroundColor {look.background}",
+        *(
+            f"skinparam {name} {look.text}"
+            for name in (
+                "defaultFontColor",
+                "ArrowColor",
+                "ArrowFontColor",
+                "ParticipantFontColor",
+                "ParticipantBorderColor",
+                "SequenceLifeLineBorderColor",
+                "ActorFontColor",
+                "ActorBorderColor",
+                "NoteFontColor",
+            )
+        ),
+        "skinparam ParticipantBackgroundColor #2b2d31",
+        "skinparam ActorBackgroundColor #2b2d31",
+    ]
+    first, _, rest = code.partition("\n")
+    if not first.lstrip().startswith("@start"):
+        return code
+    return first + "\n" + "\n".join(skin) + "\n" + rest
 
 
 def _qr(http: HttpClient) -> Callable[[Context, Mapping[str, Any]], Any]:
@@ -255,16 +364,25 @@ def _tool(
     )
 
 
+_THEME_TEXT = (
+    "light (fond blanc, défaut), dark (fond sombre, texte clair) ou transparent (texte clair, "
+    "pour un Discord sombre). Choisis-le quand on demande un fond, du contraste ou un style."
+)
+_STYLE_TEXT = (
+    "theme : " + _THEME_TEXT + " colors : couleurs voulues (red, #ff8800), dans l'ordre des "
+    "séries ou des parts."
+)
 _CHART_TEXT = (
     "Dessine un graphique (barres, courbe, camembert…) à partir de chiffres donnés. À utiliser "
     "dès qu'on demande un graphique, un camembert, une comparaison en image. labels = les "
     "catégories ; datasets = une ou plusieurs séries, chacune avec autant de valeurs que de "
-    "labels. Le graphique EST la réponse : commente-le en une phrase, ne recopie pas les chiffres."
+    "labels. Le graphique EST la réponse : commente-le en une phrase, ne recopie pas les chiffres. "
+    + _STYLE_TEXT
 )
 _DIAGRAM_TEXT = (
     "Dessine un diagramme à partir de son code : mermaid (organigramme graph TD, séquence, "
     "gantt, timeline, mindmap), graphviz (DOT), plantuml. Écris un code court et valide. Si le "
-    "service refuse, lis son message, corrige et réessaie une fois."
+    "service refuse, lis son message, corrige et réessaie une fois. theme : " + _THEME_TEXT
 )
 _QR_TEXT = "Crée un QR code pour un lien ou un texte (500 caractères au plus)."
 _MATH_TEXT = (
@@ -289,6 +407,8 @@ def _chart_schema() -> dict[str, Any]:
             "title": {"type": "string"},
             "labels": {"type": "array", "items": {"type": "string"}, "maxItems": 30},
             "datasets": {"type": "array", "items": series, "minItems": 1, "maxItems": 4},
+            "theme": {"type": "string", "enum": list(THEMES)},
+            "colors": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
         },
         "required": ["type", "labels", "datasets"],
     }
@@ -301,6 +421,7 @@ def _diagram_schema() -> dict[str, Any]:
             "kind": {"type": "string", "enum": list(DIAGRAMS)},
             "code": {"type": "string", "description": "Code du diagramme, 1500 caractères au plus"},
             "title": {"type": "string"},
+            "theme": {"type": "string", "enum": list(THEMES)},
         },
         "required": ["kind", "code"],
     }
