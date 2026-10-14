@@ -7,9 +7,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from maria_core.attachments import Digester
 from maria_core.capabilities import Capability, CapabilityRegistry, Context, Result, Risk
+from maria_core.capabilities.page import Fetched
 from maria_core.config import Settings
-from maria_core.conversation.model import AudioRef, Inbound
+from maria_core.conversation.model import AudioRef, FileRef, Inbound
 from maria_core.conversation.persona import clock_section
 from maria_core.conversation.service import UNAVAILABLE_TEXT, ConversationService
 from maria_core.db import Database
@@ -18,6 +20,7 @@ from maria_core.decisions.rules import claim_rules
 from maria_core.decisions.types import Verdict
 from maria_core.llm.prompt import PromptSections
 from maria_core.llm.types import Completion, ToolCall
+from maria_core.profile import Profiles
 from maria_core.ui.widgets import WidgetRegistry
 from tests.fakes import ScriptedClient
 
@@ -376,3 +379,40 @@ def test_only_answers_with_checkable_facts_reach_the_decision() -> None:
     assert claim_rules({"answer": "Oui."}).value == "grounded"
     assert claim_rules({"answer": "Il fait très beau en ce moment dans le sud."}) is None
     assert claim_rules({"answer": "Le PSG a gagné 3-0 hier soir au Parc des Princes."}) is None
+
+
+async def test_links_files_and_profile_reach_the_model(tmp_path: Path) -> None:
+    async def fetch(url: str) -> Fetched:
+        return Fetched(
+            b"<html><title>Article</title><p>Texte du lien.</p></html>", "text/html", url
+        )
+
+    client = ScriptedClient([Completion(text="Lu.", model="fake")])
+    database = Database(tmp_path / "maria.db")
+    database.migrate()
+    profiles = Profiles(database)
+    profiles.store.set(7, "city", "Lyon", datetime(2026, 10, 14, tzinfo=UTC))
+    prompt = PromptSections()
+    prompt.register_section("personality", lambda: "Tu es MARIA.", order=0)
+    service = ConversationService(
+        database=database,
+        client=client,
+        capabilities=CapabilityRegistry(),
+        prompt=prompt,
+        settings=Settings.for_tests(tmp_path / "data"),
+        debounce_seconds=0,
+        profiles=profiles,
+        sources=(profiles.prompt_for,),
+        digester=Digester(fetch),
+    )
+    video = FileRef(filename="clip.mp4", size=10, load=_load_audio, content_type="video/mp4")
+    message = _message(mentioned=True, text="Maria, lis https://exemple.fr/a", files=(video,))
+    reply = await service.handle(message)
+    assert reply is not None and reply.chunks == ("Lu.",)
+    system = client.seen[0][0]["content"]
+    assert "PROFIL DE Léa" in system and "ville : Lyon" in system
+    seen = "\n".join(str(item["content"]) for item in client.seen[0])
+    assert "Texte du lien." in seen
+    assert "- clip.mp4 : vidéo" in seen
+    assert "NON LISIBLE" in seen
+    database.close()

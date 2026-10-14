@@ -32,6 +32,7 @@ DENIED = frozenset(
         "objective_show",
         "remember_fact",
         "forget_fact",
+        "profile_set",
         "search_memory",
         "get_server_users",
         "get_member_info",
