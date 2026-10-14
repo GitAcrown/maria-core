@@ -25,12 +25,16 @@ _GRACE_S = 20.0
 
 @dataclass(frozen=True, slots=True)
 class Backoff:
-    """5 s, 10 s, 20 s… jusqu'à 15 min. Un fils resté en vie 10 min repart de zéro."""
+    """10 s, 30 s, 90 s… jusqu'à 6 h, et l'abandon après 8 relances de suite.
 
-    first: float = 5.0
-    factor: float = 2.0
-    cap: float = 900.0
+    Un fils resté en vie 10 min repart de zéro : seuls les plantages en rafale usent les tentatives.
+    """
+
+    first: float = 10.0
+    factor: float = 3.0
+    cap: float = 21600.0
     stable: float = 600.0
+    attempts: int = 8
 
     def delay(self, failures: int) -> float:
         return min(self.cap, self.first * self.factor ** max(0, failures - 1))
@@ -73,14 +77,28 @@ def supervise(
             return 0 if halt.is_set() else code
         ran = clock() - started
         failures = 1 if ran >= plan.stable else failures + 1
+        if failures > plan.attempts:
+            tell(
+                f"Le bot s'est arrêté (code {code}) après {ran:.0f} s, {plan.attempts} fois de "
+                "suite : abandon. Regarde les journaux, corrige, puis relance-le."
+            )
+            return code if code > 0 else 1
         pause = plan.delay(failures)
         restarts += 1
         tell(
             f"Le bot s'est arrêté (code {code}) après {ran:.0f} s. "
-            f"Nouvelle tentative n°{restarts} dans {pause:.0f} s."
+            f"Nouvelle tentative {failures}/{plan.attempts} dans {_duration(pause)}."
         )
         if halt.wait(pause):
             return 0
+
+
+def _duration(seconds: float) -> str:
+    if seconds >= 3600:
+        return f"{seconds / 3600:.1f} h".replace(".0", "")
+    if seconds >= 120:
+        return f"{seconds / 60:.0f} min"
+    return f"{seconds:.0f} s"
 
 
 def _wait(child: Child, halt: threading.Event) -> int:
