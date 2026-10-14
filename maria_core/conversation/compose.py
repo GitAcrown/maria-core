@@ -171,8 +171,9 @@ def _objective_label(record: ToolRecord) -> str:
         return f"**{kind}** · {done}" if done else f"**{kind}**"
     title = _clip(str(data.get("title") or record.arguments.get("title") or ""))
     when = str(data.get("when") or "")
-    draft = data.get("status") == "draft"
-    tail = " · réponds « oui » ou « non »" if draft else (f" · {when}" if when else "")
+    if data.get("status") == "draft":
+        return ""  # la carte du brouillon porte déjà le type et la consigne de réponse
+    tail = f" · {when}" if when else ""
     return f"**{kind}** · « {title} »{tail}" if title else f"**{kind}**"
 
 

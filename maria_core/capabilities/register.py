@@ -7,6 +7,7 @@ from maria_core.capabilities import CapabilityRegistry
 from maria_core.capabilities.builtin.about import about_capability
 from maria_core.capabilities.builtin.layout import (
     layout_capabilities,
+    render_draft,
     render_table,
     render_widget,
 )
@@ -72,4 +73,5 @@ def register_builtins(app: BuiltinHost, condense: Condense | None = None) -> Non
     app.widgets.register("search_images", render_images)
     app.widgets.register("render_widget", render_widget)
     app.widgets.register("render_table", render_table)
+    app.widgets.register("objective_draft", render_draft)
     app.prompt.register_section("objectives", lambda: GUIDE, order=5)
