@@ -65,6 +65,11 @@ def _delay(seconds: float) -> str:
     return " ".join(part for part in parts if part) or "quelques instants"
 
 
+def fatal_errors() -> tuple[type[Exception], ...]:
+    """Ce que Discord refuse pour de bon (jeton, intents) : relancer ne servirait à rien."""
+    return (discord.LoginFailure, discord.PrivilegedIntentsRequired)
+
+
 def build_intents() -> discord.Intents:
     """Intents privilégiés nécessaires à la conversation, à la voix et aux membres."""
     intents = discord.Intents.default()
