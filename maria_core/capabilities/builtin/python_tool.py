@@ -29,9 +29,10 @@ def python_capability(database: Database) -> Capability:
     return Capability(
         name="run_python",
         description=(
-            "Exécute un court programme Python (math, statistics, datetime, decimal, json, re). "
+            "Exécute un court programme Python. math, statistics, datetime, decimal, json et re "
+            "sont déjà disponibles (import inutile, les autres modules n'existent pas). "
             "print() et la dernière expression sont renvoyés. "
-            "Pas de fichiers, pas de réseau, pas d'import, 4 secondes. "
+            "Pas de fichiers ni de réseau, 4 secondes. "
             "Seulement du Python valide, jamais du langage naturel."
         ),
         parameters={
