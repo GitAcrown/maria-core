@@ -32,6 +32,8 @@ from maria_core.objectives.drafts import Drafts
 from maria_core.objectives.fetch import brave_searcher, http_fetcher
 from maria_core.objectives.report import ReportWriter
 from maria_core.plugins import PluginManager
+from maria_core.profile import Profiles
+from maria_core.profile.tools import profile_capability
 from maria_core.social.service import Social
 from maria_core.ui import WidgetRegistry
 from maria_core.vectors import NullIndex
@@ -67,6 +69,7 @@ class App:
         self.polls = PollStore(database)
         self.memory = Memories(database, _index(settings), engine=self.engine)
         self.memory_summaries = MemorySummaries(self.llm)
+        self.profiles = Profiles(database)
         self.social = Social(database, self.engine)
         self.objectives = Objectives(database, fetcher=http_fetcher(self.http), judge=self._judge)
         self.objectives.pipeline.searcher = brave_searcher(self.http, settings.brave_api_key)
@@ -87,11 +90,13 @@ class App:
             widgets=self.widgets,
             memory=self.memory,
             social=self.social,
-            sources=(self._polls,),
+            sources=(self._polls, self.profiles.prompt_for),
+            profiles=self.profiles,
         )
         self.drafts = Drafts(self.objectives, self.engine)
         self.conversation.drafts = self.drafts
         register_builtins(self, condense=self._condense)
+        self.capabilities.register(profile_capability(self.profiles))
         self.objectives.pipeline.writer = ReportWriter(
             client=self.llm,
             capabilities=self.capabilities,
@@ -99,6 +104,7 @@ class App:
             database=database,
             widgets=self.widgets,
             profile=self._profile,
+            slots=self.profiles,
         )
         self.plugins = PluginManager(self)
         self._closed = False

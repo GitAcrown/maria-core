@@ -1,5 +1,6 @@
 """Ce que MARIA_R faisait en coulisses : cache des outils, galerie fusionnée, erreurs, heures."""
 
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -17,9 +18,10 @@ from maria_core.db import Database
 from maria_core.discord.bot import on_app_command_error
 from maria_core.discord.commands.usage import usage_report
 from maria_core.discord.task_edit import when_changes
-from maria_core.llm.loop import LoopResult, ToolRecord
-from maria_core.llm.types import ToolCall
+from maria_core.llm.loop import LoopResult, ToolRecord, complete_turn
+from maria_core.llm.types import Completion, ToolCall
 from maria_core.ui.widgets import WidgetRegistry
+from tests.fakes import ScriptedClient
 
 
 def _context() -> Context:
@@ -143,3 +145,60 @@ async def test_usage_report_summarises_model_and_tool_calls(tmp_path) -> None:
     assert "`get_weather` · 2 appel(s) · 400 ms · **1 échec(s)**" in text
     assert meta == "7 derniers jours"
     database.close()
+
+
+async def test_independent_reads_run_together_and_keep_their_order() -> None:
+    started: list[str] = []
+    gate = asyncio.Event()
+
+    async def execute(call: ToolCall) -> Result:
+        started.append(call.name)
+        if len(started) == 2:
+            gate.set()
+        await asyncio.wait_for(gate.wait(), 1)
+        return Result(ok=True, data={"name": call.name})
+
+    calls = (
+        ToolCall(id="1", name="get_weather", arguments={}),
+        ToolCall(id="2", name="get_football", arguments={}),
+    )
+    client = ScriptedClient([Completion(text="", tool_calls=calls), Completion(text="Voilà")])
+    outcome = await complete_turn(
+        client,
+        [{"role": "user", "content": "météo et foot"}],
+        system="s",
+        tools=[{"type": "function", "function": {"name": "x"}}],
+        execute=execute,
+        parallel_safe=lambda name: True,
+    )
+    assert [record.name for record in outcome.records] == ["get_weather", "get_football"]
+    assert outcome.text == "Voilà"
+
+
+async def test_a_write_keeps_the_whole_batch_in_series() -> None:
+    order: list[str] = []
+
+    async def execute(call: ToolCall) -> Result:
+        order.append(f"start {call.name}")
+        order.append(f"end {call.name}")
+        return Result(ok=True, data={})
+
+    calls = (
+        ToolCall(id="1", name="remember_fact", arguments={}),
+        ToolCall(id="2", name="get_weather", arguments={}),
+    )
+    client = ScriptedClient([Completion(text="", tool_calls=calls), Completion(text="ok")])
+    await complete_turn(
+        client,
+        [{"role": "user", "content": "x"}],
+        system="s",
+        tools=[{"type": "function", "function": {"name": "x"}}],
+        execute=execute,
+        parallel_safe=lambda name: name != "remember_fact",
+    )
+    assert order == [
+        "start remember_fact",
+        "end remember_fact",
+        "start get_weather",
+        "end get_weather",
+    ]

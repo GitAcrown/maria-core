@@ -70,6 +70,15 @@ def downgrade(text: str, usable: frozenset[int] | None) -> str:
     return text
 
 
+SLOT_ICONS = {
+    "city": "🏠",
+    "team": "⚽",
+    "stop": "🚇",
+    "length": "📏",
+    "tone": "🗣️",
+    "emoji": "😀",
+}
+
 KIND_ICONS = {
     "Rappel": SMALL_TASK,
     "Rappel récurrent": REPEAT_REMINDER,

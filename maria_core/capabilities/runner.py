@@ -2,11 +2,20 @@
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 from time import perf_counter
+from typing import Protocol
 
 from maria_core.capabilities.arguments import prepare_arguments
-from maria_core.capabilities.base import Capability, CapabilityRegistry, Context, Result, Risk
+from maria_core.capabilities.base import (
+    PROFILE_MARK,
+    Capability,
+    CapabilityRegistry,
+    Context,
+    Result,
+    Risk,
+)
 from maria_core.capabilities.cache import ResultCache
 from maria_core.config import Settings
 from maria_core.db import Database
@@ -15,6 +24,15 @@ from maria_core.llm.types import ToolCall
 logger = logging.getLogger(__name__)
 
 CACHE = ResultCache()
+
+
+class SlotSource(Protocol):
+    """Le profil des personnes, vu des outils."""
+
+    def value(self, user_id: int, key: str) -> str: ...
+
+    def label(self, key: str) -> str: ...
+
 
 _SETTING_FOR_KEY = {
     "OPENAI_API_KEY": "openai_api_key",
@@ -37,9 +55,10 @@ async def invoke(
     call: ToolCall,
     *,
     database: Database | None = None,
+    slots: SlotSource | None = None,
 ) -> Result:
     started = perf_counter()
-    result = await _invoke(registry, settings, context, call)
+    result = await _invoke(registry, settings, context, call, slots)
     if database is not None:
         elapsed = max(0, int((perf_counter() - started) * 1000))
         await asyncio.to_thread(_log, database, context, call.name, result, elapsed)
@@ -61,6 +80,7 @@ async def _invoke(
     settings: Settings,
     context: Context,
     call: ToolCall,
+    slots: SlotSource | None,
 ) -> Result:
     if call.name not in registry:
         return Result(ok=False, data={}, error=f"Outil inconnu : {call.name}")
@@ -72,24 +92,61 @@ async def _invoke(
     denied = _denied(capability, context)
     if denied:
         return Result(ok=False, data={}, error=denied)
+    raw = dict(call.arguments)
+    used: list[tuple[str, str, str]] = []
+    problem = _fill(capability, raw, context.user_id, slots, used)
+    if problem:
+        return Result(ok=False, data={}, error=problem)
     try:
-        arguments = prepare_arguments(capability.parameters, dict(call.arguments))
+        arguments = prepare_arguments(capability.parameters, raw)
     except ValueError as exc:
         return Result(ok=False, data={}, error=str(exc))
     if capability.cache_s:
         cached = CACHE.get(call.name, arguments)
         if cached is not None:
-            return cached
+            return _tagged(cached, used)
     try:
         result = await asyncio.wait_for(capability.run(context, arguments), capability.timeout_s)
         CACHE.put(call.name, arguments, result, capability.cache_s)
-        return result
+        return _tagged(result, used)
     except TimeoutError:
         logger.warning("Capacité %s : délai dépassé", call.name)
         return Result(ok=False, data={}, error="Délai dépassé.")
     except Exception as exc:
         logger.exception("Capacité %s en échec", call.name)
         return Result(ok=False, data={}, error=str(exc))
+
+
+def _fill(
+    capability: Capability,
+    raw: dict[str, object],
+    user_id: int,
+    slots: SlotSource | None,
+    used: list[tuple[str, str, str]],
+) -> str:
+    """Remplace « @profil » (ou un argument vide, s'il y a lieu) par le champ du profil."""
+    for argument, key, when_empty in capability.profile_args:
+        given = str(raw.get(argument) or "").strip()
+        if given.casefold() != PROFILE_MARK and (given or not when_empty):
+            continue
+        found = slots.value(user_id, key) if slots is not None else ""
+        if not found:
+            label = slots.label(key) if slots is not None else key
+            return (
+                f"Le profil n'a pas de champ « {label} » : demande-le à la personne "
+                "(elle peut aussi le régler avec /profil)."
+            )
+        raw[argument] = found
+        used.append((key, slots.label(key) if slots is not None else key, found))
+    return ""
+
+
+def _tagged(result: Result, used: list[tuple[str, str, str]]) -> Result:
+    """Garde la trace des champs du profil utilisés, pour que la réponse puisse les montrer."""
+    if not used or not result.ok:
+        return result
+    marks = [{"slot": key, "label": label, "value": value} for key, label, value in used]
+    return replace(result, data={**result.data, "profile_used": marks})
 
 
 def _denied(capability: Capability, context: Context) -> str:

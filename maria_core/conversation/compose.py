@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 from maria_core.llm.clean import clean_reply, silence_marks
 from maria_core.llm.loop import LoopResult, ToolRecord
+from maria_core.ui.emojis import SLOT_ICONS
 from maria_core.ui.widgets import Card, WidgetRegistry, gallery, show
 
 UNAVAILABLE_TEXT = "Je n'arrive pas à répondre pour l'instant, réessaie dans un moment."
@@ -123,10 +124,25 @@ def _footer(records: tuple[ToolRecord, ...]) -> str:
         label = _label(record)
         if label and label not in lines:
             lines.append(label)
+    lines.extend(_profile_lines(records))
     if sources:
         title = "Sources" if len(sources) > 1 else "Source"
         lines.append(f"**{title}** · " + " · ".join(sources))
     return "\n".join(f"-# {line}" for line in lines)
+
+
+def _profile_lines(records: tuple[ToolRecord, ...]) -> list[str]:
+    """« 🏠 Lyon · ville de ton profil » : la personne voit ce qui a été pris dans son profil."""
+    seen: dict[str, str] = {}
+    for record in records:
+        if not record.result.ok:
+            continue
+        for mark in record.result.data.get("profile_used") or []:
+            icon = SLOT_ICONS.get(str(mark.get("slot")), "👤")
+            seen[str(mark.get("slot"))] = (
+                f"{icon} {mark.get('value')} · {str(mark.get('label')).lower()} de ton profil"
+            )
+    return list(seen.values())
 
 
 def _label(record: ToolRecord) -> str:

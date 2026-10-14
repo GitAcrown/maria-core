@@ -34,6 +34,7 @@ from maria_core.llm.types import ChatClient
 from maria_core.memory.model import MemoryAsk
 from maria_core.memory.service import Memories
 from maria_core.memory.text import explicit_fact
+from maria_core.profile.service import Profiles
 from maria_core.social.service import Social
 from maria_core.ui.render import split_message
 from maria_core.ui.widgets import WidgetRegistry
@@ -79,6 +80,7 @@ class ConversationService:
         memory: Memories | None = None,
         social: Social | None = None,
         sources: Sequence[ContextSource] = (),
+        profiles: Profiles | None = None,
     ) -> None:
         self._database = database
         self._client = client
@@ -90,6 +92,7 @@ class ConversationService:
         self._widgets = widgets or WidgetRegistry()
         self._memory = memory
         self._social = social
+        self._profiles = profiles
         self._sources = list(sources)
         self._turns = asyncio.Semaphore(_PARALLEL_TURNS)
         self._locks: dict[int, asyncio.Lock] = {}
@@ -101,6 +104,7 @@ class ConversationService:
             database=database,
             prompt=prompt,
             engine=engine,
+            slots=profiles,
         )
         self.drafts: DraftDesk | None = None
 
@@ -128,6 +132,7 @@ class ConversationService:
             return None
         if self._social is not None:
             self._social.note_addressed(message)
+        await self._learn_profile(message)
         self._history(message.channel_id).add(user_entry(message, addressed=True))
         if await self._react_instead(message, route):
             return None
@@ -298,6 +303,15 @@ class ConversationService:
         if self._memory is not None:
             found.append(await asyncio.to_thread(self._memory.prompt_for, message))
         return [item for item in found if item]
+
+    async def _learn_profile(self, message: Inbound) -> None:
+        """Style de la personne et champs dits clairement, sans rien lui demander."""
+        if self._profiles is None or message.edited:
+            return
+        try:
+            await asyncio.to_thread(self._profiles.observe, message)
+        except Exception:
+            logger.exception("Profil non mis à jour pour %s", message.author_id)
 
     async def _note(self, message: Inbound) -> None:
         if self._social is not None:

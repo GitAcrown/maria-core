@@ -37,8 +37,9 @@ def football_capability(http: HttpClient, api_key: str = "") -> Capability:
         name="get_football",
         description=(
             "Score et stats d'un match de foot en cours ou récent. team = club ou sélection "
-            "(PSG, France) ; opponent si deux équipes citées. when : auto (direct sinon dernier "
-            "match), live, last, next, recent (5 derniers). Sans team : matchs en direct."
+            "(PSG, France), ou @profil pour « mon équipe » ; opponent si deux équipes citées. "
+            "when : auto (direct sinon dernier match), live, last, next, recent (5 derniers). "
+            "Sans team : matchs en direct."
         ),
         parameters={
             "type": "object",
@@ -50,6 +51,7 @@ def football_capability(http: HttpClient, api_key: str = "") -> Capability:
             "required": [],
         },
         risk=Risk.EXTERNAL,
+        profile_args=(("team", "team", False),),
         cache_s=45,
         run=run,
     )

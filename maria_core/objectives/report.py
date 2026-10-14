@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from maria_core.capabilities import CapabilityRegistry, Context, Result
-from maria_core.capabilities.runner import available, invoke
+from maria_core.capabilities.runner import SlotSource, available, invoke
 from maria_core.config import Settings
 from maria_core.conversation.compose import compose
 from maria_core.db import Database
@@ -75,6 +75,7 @@ class ReportWriter:
         database: Database,
         widgets: WidgetRegistry,
         profile: Profile | None = None,
+        slots: SlotSource | None = None,
     ) -> None:
         self._client = client
         self._capabilities = capabilities
@@ -82,6 +83,7 @@ class ReportWriter:
         self._database = database
         self._widgets = widgets
         self._profile = profile
+        self._slots = slots
 
     async def write(
         self,
@@ -128,7 +130,12 @@ class ReportWriter:
             if call.name in DENIED:
                 return Result(ok=False, data={}, error="Outil indisponible pendant un objectif.")
             return await invoke(
-                self._capabilities, self._settings, context, call, database=self._database
+                self._capabilities,
+                self._settings,
+                context,
+                call,
+                database=self._database,
+                slots=self._slots,
             )
 
         prompt = [

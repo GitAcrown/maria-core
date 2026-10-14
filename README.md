@@ -44,6 +44,7 @@ Slash (après `5!sync`) :
 | Commande | Rôle |
 |---|---|
 | `/moi`, `/global` | Résumé de ce que MARIA sait, souvenirs, propositions, modifier, oublier, tout effacer |
+| `/profil` | Ce que MARIA sait de toi (ville, équipe, arrêt) et comment elle te parle : tout se voit et se change |
 | `/programmes` | Rappels, écoutes et surveillances : modifier, pause, reprise, saut, confirmation, suppression, tout supprimer |
 | `/info` | Réglages du salon et outils disponibles |
 | `/chatbot mode\|forget\|everyone\|autotranscribe\|python\|spontaneite` | Réglages, modérateurs |

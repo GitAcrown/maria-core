@@ -5,8 +5,8 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from maria_core.capabilities import CapabilityRegistry, Context, Result
-from maria_core.capabilities.runner import available, invoke
+from maria_core.capabilities import CapabilityRegistry, Context, Result, Risk
+from maria_core.capabilities.runner import SlotSource, available, invoke
 from maria_core.config import Settings
 from maria_core.conversation.context import SILENCE_GUIDE, focus_note, turn_header
 from maria_core.conversation.model import Inbound, Policy
@@ -46,6 +46,7 @@ class TurnRunner:
         database: Database,
         prompt: PromptSections,
         engine: Decider | None,
+        slots: SlotSource | None = None,
     ) -> None:
         self._client = client
         self._capabilities = capabilities
@@ -53,6 +54,7 @@ class TurnRunner:
         self._database = database
         self._prompt = prompt
         self._engine = engine
+        self._slots = slots
 
     async def run(self, data: TurnInput) -> LoopResult:
         choice = await self._choice(data.message)
@@ -87,7 +89,12 @@ class TurnRunner:
             if refused is not None:
                 return refused
             result = await invoke(
-                self._capabilities, self._settings, context, call, database=self._database
+                self._capabilities,
+                self._settings,
+                context,
+                call,
+                database=self._database,
+                slots=self._slots,
             )
             guard.saw(call, result)
             return result
@@ -99,7 +106,14 @@ class TurnRunner:
             tools=tools,
             execute=execute,
             first_choice=choice if tools else "auto",
+            parallel_safe=self._parallel_safe,
         )
+
+    def _parallel_safe(self, name: str) -> bool:
+        """Lire et chercher peuvent se faire en même temps ; écrire ou exécuter, jamais."""
+        if name not in self._capabilities:
+            return False
+        return self._capabilities.get(name).risk in {Risk.READ, Risk.EXTERNAL}
 
     async def _choice(self, message: Inbound) -> ToolChoice:
         """Une demande factuelle claire part d'abord sur un outil, jamais de mémoire."""
@@ -119,9 +133,14 @@ class _SearchGuard:
     def __init__(self) -> None:
         self._done = 0
         self._empty = False
+        self._running = False
 
     def refuse(self, call: ToolCall) -> Result | None:
-        if call.name != _SEARCH or self._done == 0 or (self._empty and self._done < 2):
+        if call.name != _SEARCH:
+            return None
+        busy = self._running or (self._done > 0 and not (self._empty and self._done < 2))
+        if not busy:
+            self._running = True
             return None
         return Result(
             ok=False,
@@ -132,6 +151,7 @@ class _SearchGuard:
     def saw(self, call: ToolCall, result: Result) -> None:
         if call.name != _SEARCH:
             return
+        self._running = False
         self._done += 1
         self._empty = not result.ok or not result.data.get("results")
 
