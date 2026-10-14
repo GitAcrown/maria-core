@@ -179,7 +179,8 @@ async def test_the_same_message_fires_an_event_objective_once(tmp_path: Path) ->
     assert await service.matcher.handle(signal, now=clock[0]) == 0
     assert courier.sent[0].startswith("j'ai vu le métro")
     assert len(courier.sent) == 1
-    assert "le métro est bloqué" in courier.sent[0]
+    assert "le métro est bloqué" in courier.deliveries[0].quote
+    assert "le métro" not in courier.sent[0].replace("j'ai vu le métro", "")
     database.close()
 
 

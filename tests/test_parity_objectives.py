@@ -134,7 +134,8 @@ async def test_a_one_shot_listening_objective_is_active_at_once_and_fires_once(
     )
     assert await service.matcher.handle(second, now=clock[0]) == 0
     assert len(courier.sent) == 1
-    assert "> une classé ?" in courier.sent[0].text
+    assert courier.sent[0].quote == "une classé ?"
+    assert courier.sent[0].trigger is None  # ce signal n'a pas d'identifiant de message
     database.close()
 
 
@@ -380,11 +381,16 @@ async def test_the_alert_names_who_spoke_not_who_asked(tmp_path: Path) -> None:
         user_id=8,
         text="Le corset est un film sur la scoliose",
         author_name="Léa",
+        message_id=9,
+        url="https://discord.test/9",
     )
     assert await service.matcher.handle(signal, now=clock[0]) == 1
-    assert courier.sent[0].text == (
-        "Quelqu'un parle du film Le Corset\n> **Léa** : Le corset est un film sur la scoliose"
-    )
+    sent = courier.sent[0]
+    assert sent.text == "Quelqu'un parle du film Le Corset"
+    assert sent.quote == "**Léa** : Le corset est un film sur la scoliose"
+    assert sent.trigger == 9 and sent.trigger_channel == 3
+    assert "[message]" not in sent.footer
+    assert "[message](<https://discord.test/9>)" in sent.footer_linked
     database.close()
 
 

@@ -36,6 +36,10 @@ class Delivery:
     footer: str = ""
     mention: bool = True
     reply_to: int | None = None
+    quote: str = ""  # le message détecté, cité seulement faute de pouvoir lui répondre
+    trigger: int | None = None  # id du message détecté : l'alerte lui répond
+    trigger_channel: int | None = None
+    footer_linked: str = ""  # le pied avec le lien du message, pour un MP ou un autre salon
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,9 +214,22 @@ class Pipeline:
             written = await self._written(objective, instruction, current, runs)
             if written is None:
                 return None
-            return Delivery(written.text, written.cards, footer, mention, reply_to)
+            return Delivery(
+                written.text,
+                written.cards,
+                footer,
+                mention,
+                reply_to,
+                **_trigger(signal, _footer(objective, current, signal, linked=True)),
+            )
         text = _plain(kind, instruction, current, signal)
-        return Delivery(text, footer=footer, mention=mention, reply_to=reply_to)
+        return Delivery(
+            text,
+            footer=footer,
+            mention=mention,
+            reply_to=reply_to,
+            **_trigger(signal, _footer(objective, current, signal, linked=True)),
+        )
 
     async def _written(
         self,
@@ -257,21 +274,34 @@ def _plain(kind: str, instruction: str, current: Pass, signal: ObjectiveSignal |
         clip = instruction or current.page[:180]
         return f"{clip}\n<{current.url}>" if current.url else clip
     text = instruction or "C'est l'heure."
-    if signal is not None and signal.kind == "message" and signal.text:
-        who = f"**{signal.author_name}** : " if signal.author_name else ""
-        return f"{text}\n> {who}{' '.join(signal.text.split())[:160]}"
-    if signal is not None:
+    if signal is not None and signal.kind != "message":
         return f"{text}\n> {signal.fact()}"
     return text
 
 
-def _footer(objective: Objective, current: Pass, signal: ObjectiveSignal | None) -> str:
+def _trigger(signal: ObjectiveSignal | None, linked: str) -> dict[str, Any]:
+    """Le message détecté : l'alerte lui répond ; sinon (MP, autre salon) elle le cite."""
+    if signal is None or signal.kind != "message" or not signal.text:
+        return {}
+    who = f"**{signal.author_name}** : " if signal.author_name else ""
+    return {
+        "quote": f"{who}{' '.join(signal.text.split())[:160]}",
+        "trigger": signal.message_id,
+        "trigger_channel": signal.channel_id,
+        "footer_linked": linked,
+    }
+
+
+def _footer(
+    objective: Objective, current: Pass, signal: ObjectiveSignal | None, linked: bool = False
+) -> str:
     fires = objective.fires + 1
     limit = objective.max_fires
     count = f"alerte {fires}/{limit or '∞'}"
     done = " · écoute terminée" if limit is not None and fires >= limit else ""
-    if signal is not None and signal.url:
-        return f"**Écoute** · [message](<{signal.url}>) · {count}{done}"
+    if signal is not None and signal.kind == "message":
+        link = f"[message](<{signal.url}>) · " if linked and signal.url else ""
+        return f"**Écoute** · {link}{count}{done}"
     if signal is not None:
         return f"**Écoute** · {signal.fact()[:100]} · {count}{done}"
     if current.price is not None:
