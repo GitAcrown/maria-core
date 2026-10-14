@@ -79,15 +79,21 @@ def check_plan(
         raise ValueError("Une veille web se vérifie au plus toutes les 6 h.")
 
 
-def is_conditional(
-    trigger: Mapping[str, Any], condition: Mapping[str, Any] | None, action: Mapping[str, Any]
+_RECURRING = frozenset({"daily", "weekly", "interval"})
+
+
+def needs_confirmation(
+    trigger: Mapping[str, Any], action: Mapping[str, Any], max_fires: int | None
 ) -> bool:
-    """Ce qui ne part pas à coup sûr devient un brouillon à confirmer."""
-    return (
-        condition is not None
-        or action.get("type") == "fetch_then"
-        or str(trigger.get("type") or "") in EVENT_TRIGGERS
-    )
+    """Seuls les suivis qui peuvent devenir pénibles demandent un oui : ce qui se répète
+    (rappel récurrent, écoute répétée) et les veilles de page ou de prix.
+
+    Un rappel isolé, ou « préviens-moi une fois si on parle de ça », part tout de suite.
+    """
+    kind = str(trigger.get("type") or "")
+    if kind in _RECURRING or action.get("type") == "fetch_then":
+        return True
+    return kind in EVENT_TRIGGERS and max_fires != 1
 
 
 def _at(args: Mapping[str, Any], now: datetime | None) -> dict[str, Any]:
