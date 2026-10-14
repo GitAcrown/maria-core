@@ -17,7 +17,7 @@ def test_every_custom_emoji_from_maria_r_has_a_fallback() -> None:
         for name, value in vars(icons).items()
         if name.isupper() and isinstance(value, str) and value.startswith("<:")
     ]
-    assert len(tags) == 23
+    assert len(tags) == 24
     assert set(tags) <= set(FALLBACKS)
 
 

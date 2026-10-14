@@ -25,11 +25,13 @@ REPEAT_REMINDER = "<:m_small_loop:1555885612022898771>"
 EVENT_TASK = "<:event:1557881738456211527>"
 TRANSCRIPT = "<:transcript:1517996112001372303>"
 TRANSCRIPT_SUB = "<:m_small_trasncript:1555888662049456209>"
+CHART = "<:m_chart:1555563454394273923>"
 BOOKMARK = "<:save:1539017570894610543>"
 SAVE_SMALL = "<:save_small:1539018471931641926>"
 PENCIL = "<:pencil:1539037226095353996>"
 
 FALLBACKS = {
+    CHART: "📊",
     SETTINGS: "⚙️",
     FOOTBALL: "⚽",
     FOOTBALL_PLAYER: "⚽",
@@ -80,9 +82,9 @@ SLOT_ICONS = {
 }
 
 VISUAL_ICONS = {
-    "chart": "📊",
-    "plot": "📈",
-    "diagram": "🧭",
+    "chart": CHART,
+    "plot": CHART,
+    "diagram": CHART,
     "qr": "🔳",
     "math": "➗",
 }
