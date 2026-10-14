@@ -66,7 +66,7 @@ def transport_capability(http: HttpClient, settings: Settings) -> Capability:
             "Transports : Île-de-France (PRIM) et trains SNCF (TGV, TER, Intercités). "
             "stop = arrêt ou gare : prochains passages (line pour filtrer). line seule (RER B, "
             "11, T3a) : trafic de la ligne. Ni l'un ni l'autre : trafic global IDF. "
-            "« mon métro » : l'arrêt est peut-être dans le PROFIL."
+            "« mon métro », « mon arrêt » : stop=@profil."
         ),
         parameters={
             "type": "object",
@@ -77,6 +77,7 @@ def transport_capability(http: HttpClient, settings: Settings) -> Capability:
             "required": [],
         },
         risk=Risk.EXTERNAL,
+        profile_args=(("stop", "stop", False),),
         cache_s=45,
         run=run,
         requires_any=frozenset({"PRIM_API_KEY", "SNCF_API_KEY"}),

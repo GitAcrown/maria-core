@@ -39,19 +39,20 @@ def weather_capability(http: HttpClient, api_key: str) -> Capability:
         description=(
             "Météo d'une ville. type=current pour maintenant, type=forecast pour les jours. "
             "target_date : demain, un jour (lundi), ou YYYY-MM-DD ; vide : la semaine. "
-            "Ville absente (« chez moi », « ma ville ») : celle du PROFIL ; sinon search_memory "
-            "avant de demander."
+            "city : la ville, ou @profil pour celle de la personne (« chez moi », « ici », aucune "
+            "ville citée)."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "city": {"type": "string"},
+                "city": {"type": "string", "description": "Ville, ou @profil"},
                 "type": {"type": "string", "enum": ["current", "forecast"]},
                 "target_date": {"type": "string"},
             },
             "required": ["city", "type"],
         },
         risk=Risk.EXTERNAL,
+        profile_args=(("city", "city", True),),
         cache_s=600,
         run=run,
         requires=frozenset({"OPENWEATHERMAP_API_KEY"}),

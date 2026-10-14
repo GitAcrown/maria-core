@@ -1,12 +1,11 @@
 """Un tour avec le modèle : prompt, outils, garde-fous, nouvel essai sans image."""
 
-import asyncio
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from maria_core.capabilities import CapabilityRegistry, Context, Result
-from maria_core.capabilities.runner import available, invoke
+from maria_core.capabilities import CapabilityRegistry, Context, Result, Risk
+from maria_core.capabilities.runner import SlotSource, available, invoke
 from maria_core.config import Settings
 from maria_core.conversation.context import SILENCE_GUIDE, focus_note, turn_header
 from maria_core.conversation.model import Inbound, Policy
@@ -22,6 +21,11 @@ logger = logging.getLogger(__name__)
 
 _IMAGE_ERRORS = ("image", "invalid_image")
 _SEARCH = "search_web"
+_VERIFY_HINT = (
+    "[VÉRIFICATION] Ta réponse précédente donnait des faits d'actualité sans les avoir "
+    "vérifiés. Appelle l'outil adapté (recherche web, météo, score…) puis réponds à nouveau, "
+    "avec le même ton qu'avant."
+)
 
 
 @dataclass(slots=True)
@@ -46,6 +50,7 @@ class TurnRunner:
         database: Database,
         prompt: PromptSections,
         engine: Decider | None,
+        slots: SlotSource | None = None,
     ) -> None:
         self._client = client
         self._capabilities = capabilities
@@ -53,15 +58,43 @@ class TurnRunner:
         self._database = database
         self._prompt = prompt
         self._engine = engine
+        self._slots = slots
 
     async def run(self, data: TurnInput) -> LoopResult:
         choice = await self._choice(data.message)
         outcome = await self._once(data, choice)
+        outcome = await self._verified(data, outcome)
         if not outcome.ok and any(word in outcome.error.lower() for word in _IMAGE_ERRORS):
             logger.warning("Image refusée par le modèle, nouvel essai sans image")
             data.history.without_images()
             outcome = await self._once(data, choice)
         return outcome
+
+    async def _verified(self, data: TurnInput, outcome: LoopResult) -> LoopResult:
+        """Un fait d'actualité donné sans outil est revérifié une fois, sans toucher au ton."""
+        if self._engine is None or not outcome.ok or outcome.records or not outcome.text:
+            return outcome
+        question = data.message.text[:400]
+        state = {"question": question, "answer": outcome.text[:600], "tools": 0}
+        try:
+            verdict = await self._engine.resolve("claim_check", state)
+        except Exception:
+            logger.exception("Décision claim_check en échec")
+            return outcome
+        if verdict.value != "needs_check":
+            return outcome
+        logger.info("Réponse sans outil revérifiée pour le message %s", data.message.message_id)
+        hinted = replace(data, extras=(*data.extras, _VERIFY_HINT))
+        again = await self._once(hinted, "required")
+        if not again.ok or not again.records or not again.text:
+            return outcome
+        return replace(
+            again,
+            input_tokens=again.input_tokens + outcome.input_tokens,
+            output_tokens=again.output_tokens + outcome.output_tokens,
+            calls=again.calls + outcome.calls,
+            duration_ms=again.duration_ms + outcome.duration_ms,
+        )
 
     def system(self, data: TurnInput) -> str:
         parts = [self._prompt.render()]
@@ -87,7 +120,12 @@ class TurnRunner:
             if refused is not None:
                 return refused
             result = await invoke(
-                self._capabilities, self._settings, context, call, database=self._database
+                self._capabilities,
+                self._settings,
+                context,
+                call,
+                database=self._database,
+                slots=self._slots,
             )
             guard.saw(call, result)
             return result
@@ -99,7 +137,14 @@ class TurnRunner:
             tools=tools,
             execute=execute,
             first_choice=choice if tools else "auto",
+            parallel_safe=self._parallel_safe,
         )
+
+    def _parallel_safe(self, name: str) -> bool:
+        """Lire et chercher peuvent se faire en même temps ; écrire ou exécuter, jamais."""
+        if name not in self._capabilities:
+            return False
+        return self._capabilities.get(name).risk in {Risk.READ, Risk.EXTERNAL}
 
     async def _choice(self, message: Inbound) -> ToolChoice:
         """Une demande factuelle claire part d'abord sur un outil, jamais de mémoire."""
@@ -119,9 +164,14 @@ class _SearchGuard:
     def __init__(self) -> None:
         self._done = 0
         self._empty = False
+        self._running = False
 
     def refuse(self, call: ToolCall) -> Result | None:
-        if call.name != _SEARCH or self._done == 0 or (self._empty and self._done < 2):
+        if call.name != _SEARCH:
+            return None
+        busy = self._running or (self._done > 0 and not (self._empty and self._done < 2))
+        if not busy:
+            self._running = True
             return None
         return Result(
             ok=False,
@@ -132,6 +182,7 @@ class _SearchGuard:
     def saw(self, call: ToolCall, result: Result) -> None:
         if call.name != _SEARCH:
             return
+        self._running = False
         self._done += 1
         self._empty = not result.ok or not result.data.get("results")
 
@@ -147,30 +198,3 @@ def _context(message: Inbound) -> Context:
         text=message.text,
         author_name=message.author_name,
     )
-
-
-async def read_files(message: Inbound, limit: int) -> str:
-    """Contenu des fichiers texte joints, borné. Vide si rien de lisible."""
-    blocks: list[str] = []
-    for item in message.files:
-        try:
-            raw = await item.load()
-        except Exception:
-            logger.warning("Fichier %s illisible", item.filename, exc_info=True)
-            continue
-        text = await asyncio.to_thread(_decode, raw)
-        if not text:
-            continue
-        clipped = text if len(text) <= limit else text[:limit] + "\n… [tronqué]"
-        extension = item.filename.rsplit(".", 1)[-1] if "." in item.filename else "txt"
-        blocks.append(f"[Fichier {item.filename}]\n```{extension}\n{clipped}\n```")
-    return "\n".join(blocks)
-
-
-def _decode(raw: bytes) -> str:
-    for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
-        try:
-            return raw.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return ""

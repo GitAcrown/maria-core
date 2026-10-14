@@ -35,5 +35,8 @@ class Proposal:
 
 @dataclass(frozen=True, slots=True)
 class MemoryAsk:
-    proposal_id: int
+    """Ce qui s'ajoute à la réponse : une question (proposition) ou une trace (souvenir retenu)."""
+
     text: str
+    proposal_id: int | None = None
+    learned_id: int | None = None

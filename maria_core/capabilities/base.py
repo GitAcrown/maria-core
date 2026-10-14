@@ -11,6 +11,9 @@ from maria_core.errors import RegistryError
 from maria_core.names import require_name
 from maria_core.registry import Registry
 
+# Un argument vaut « @profil » : l'outil lit le champ correspondant du profil de la personne.
+PROFILE_MARK = "@profil"
+
 
 class Risk(StrEnum):
     READ = "read"
@@ -72,6 +75,7 @@ class Capability:
     requires_any: frozenset[str] = frozenset()
     timeout_s: float = 20.0
     cache_s: float = 0.0
+    profile_args: tuple[tuple[str, str, bool], ...] = ()
 
     def __post_init__(self) -> None:
         require_name(self.name, what="Capacité")

@@ -94,6 +94,39 @@ def intent_rules(state: Mapping[str, Any]) -> RuleHit | None:
     return None
 
 
+_LIVE = re.compile(
+    r"\b(?:aujourd['\u2019]hui|hier|demain|ce soir|cette semaine|actuel(?:le)?(?:ment)?|"
+    r"en ce moment|r[e\u00e9]cemment|prix|score|cours|m[e\u00e9]t[e\u00e9]o|r[e\u00e9]sultats?)\b",
+    re.IGNORECASE,
+)
+
+
+_SENSITIVE = re.compile(
+    r"d[e\u00e9]prim|d[e\u00e9]pression|anxi|suicid|cancer|maladi|diagnostic|handicap|"
+    r"th[e\u00e9]rap|psy(?:chiatr|ch)|enceinte|grossesse|v\.?i\.?h|s[e\u00e9]ropositi|"
+    r"\bgay\b|lesbienn|bisexuel|homosexuel|transgenre|\btrans\b|religi|musulman|chr[e\u00e9]tien|"
+    r"\bjuif|ath[e\u00e9]e|\bvote\b|parti politique|extr[e\u00ea]me (?:droite|gauche)|\bdettes?\b|"
+    r"salaire|revenus|ch[o\u00f4]mage|addict|alcooli|drogue|casier|prison|harc[e\u00e8]l|"
+    r"violence|\bviol\b|abus",
+    re.IGNORECASE,
+)
+
+
+def sensitivity_rules(state: Mapping[str, Any]) -> RuleHit | None:
+    """Santé, religion, orientation, argent, justice : jamais retenu sans accord."""
+    return RuleHit("sensitive", 1.0) if _SENSITIVE.search(_text(state, "text")) else None
+
+
+def claim_rules(state: Mapping[str, Any]) -> RuleHit | None:
+    """Sans chiffre ni repère de temps, ou déjà appuyée par un outil : rien à vérifier."""
+    answer = _text(state, "answer")
+    if state.get("tools") or len(answer) < 25:
+        return RuleHit("grounded", 1.0)
+    if not re.search(r"\d", answer) and not _LIVE.search(answer):
+        return RuleHit("grounded", 1.0)
+    return None
+
+
 def memory_worth_rules(state: Mapping[str, Any]) -> RuleHit | None:
     if len(_text(state, "text").strip()) < 12:
         return RuleHit(False, 1.0)

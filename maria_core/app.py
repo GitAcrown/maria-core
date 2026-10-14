@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 
+from maria_core.attachments import Digester
 from maria_core.capabilities import CapabilityRegistry
 from maria_core.capabilities.builtin.discord_info import discord_capabilities
 from maria_core.capabilities.builtin.polls import PollStore, poll_capability, poll_context
 from maria_core.capabilities.http import UrllibHttpClient
+from maria_core.capabilities.page import Fetched, fetch_raw
 from maria_core.capabilities.ports import ChannelReader, GuildDirectory, PollPoster
 from maria_core.capabilities.register import register_builtins
 from maria_core.commands import CommandCatalog
@@ -32,6 +34,8 @@ from maria_core.objectives.drafts import Drafts
 from maria_core.objectives.fetch import brave_searcher, http_fetcher
 from maria_core.objectives.report import ReportWriter
 from maria_core.plugins import PluginManager
+from maria_core.profile import Profiles
+from maria_core.profile.tools import profile_capability
 from maria_core.social.service import Social
 from maria_core.ui import WidgetRegistry
 from maria_core.vectors import NullIndex
@@ -67,6 +71,7 @@ class App:
         self.polls = PollStore(database)
         self.memory = Memories(database, _index(settings), engine=self.engine)
         self.memory_summaries = MemorySummaries(self.llm)
+        self.profiles = Profiles(database)
         self.social = Social(database, self.engine)
         self.objectives = Objectives(database, fetcher=http_fetcher(self.http), judge=self._judge)
         self.objectives.pipeline.searcher = brave_searcher(self.http, settings.brave_api_key)
@@ -87,11 +92,14 @@ class App:
             widgets=self.widgets,
             memory=self.memory,
             social=self.social,
-            sources=(self._polls,),
+            sources=(self._polls, self.profiles.prompt_for),
+            profiles=self.profiles,
+            digester=Digester(self._fetch_link),
         )
         self.drafts = Drafts(self.objectives, self.engine)
         self.conversation.drafts = self.drafts
         register_builtins(self, condense=self._condense)
+        self.capabilities.register(profile_capability(self.profiles))
         self.objectives.pipeline.writer = ReportWriter(
             client=self.llm,
             capabilities=self.capabilities,
@@ -99,6 +107,7 @@ class App:
             database=database,
             widgets=self.widgets,
             profile=self._profile,
+            slots=self.profiles,
         )
         self.plugins = PluginManager(self)
         self._closed = False
@@ -194,6 +203,11 @@ class App:
             return ""
         lines = [f"- {label(item, {})} : {item.content}" for item in facts]
         return "PROFIL DU DESTINATAIRE :\n" + "\n".join(lines)
+
+    async def _fetch_link(self, url: str) -> Fetched:
+        """Page d'un lien du message : un PDF peut être plus lourd qu'une page web."""
+        heavy = url.lower().split("?", 1)[0].endswith(".pdf")
+        return await fetch_raw(self.http, url, max_bytes=10_000_000 if heavy else 2_000_000)
 
     def _polls(self, message: Inbound) -> str:
         if message.guild_id is None:

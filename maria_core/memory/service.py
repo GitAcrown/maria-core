@@ -7,11 +7,19 @@ from datetime import UTC, datetime, timedelta
 from maria_core.conversation.model import Inbound
 from maria_core.db import Database
 from maria_core.decisions.engine import Decider
+from maria_core.memory.learned import LearnedLog
 from maria_core.memory.model import Memory, MemoryAsk
 from maria_core.memory.policy import Actor
 from maria_core.memory.rows import visible
-from maria_core.memory.store import MemoryStore
-from maria_core.memory.text import about_someone_else, explicit_fact, proposal_fact, second_person
+from maria_core.memory.store import MemoryDenied, MemoryStore
+from maria_core.memory.text import (
+    about_someone_else,
+    close,
+    collective_fact,
+    explicit_fact,
+    proposal_fact,
+    second_person,
+)
 from maria_core.vectors.index import VectorIndex
 
 type Clock = Callable[[], datetime]
@@ -21,6 +29,11 @@ SELF_FACTS = 6
 PROFILE_FACTS = 3
 RELEVANT = 5
 STALE_AFTER = timedelta(days=120)
+LEARNING = {
+    "auto": "MARIA retient seule, tu peux annuler",
+    "ask": "MARIA te demande avant de retenir",
+    "off": "MARIA ne retient rien sur toi",
+}
 
 
 class Memories:
@@ -33,6 +46,7 @@ class Memories:
         clock: Clock | None = None,
     ) -> None:
         self.store = MemoryStore(database, index)
+        self.learned = LearnedLog(database)
         self._index = index
         self._database = database
         self._engine = engine
@@ -97,7 +111,16 @@ class Memories:
             return None
         if await asyncio.to_thread(self.store.confirm_repeat, actor, message.text, now):
             return None
-        return await self._propose(message, now)
+        mode = await asyncio.to_thread(self.learning_mode, message.author_id, message.guild_id)
+        if mode == "off":
+            return None
+        statement = proposal_fact(message.text)
+        if statement and await self._worth(statement):
+            if mode == "ask":
+                return await self._propose(message, statement, now)
+            return await self._learn(message, statement, actor, now)
+        await self._note_collective(message, now)
+        return None
 
     def housekeeping(self) -> int:
         """Expire les propositions, purge les effacements, propose la révision des vieux faits."""
@@ -105,10 +128,7 @@ class Memories:
         self.store.maintain(now)
         return self.store.propose_stale(now, older_than=STALE_AFTER)
 
-    async def _propose(self, message: Inbound, now: datetime) -> MemoryAsk | None:
-        fact = proposal_fact(message.text)
-        if not fact or not await self._worth(fact):
-            return None
+    async def _propose(self, message: Inbound, fact: str, now: datetime) -> MemoryAsk | None:
         if await asyncio.to_thread(self.store.asked_recently, message.author_id, now):
             return None
         proposal = await asyncio.to_thread(
@@ -121,12 +141,89 @@ class Memories:
             source_message_id=message.message_id,
             now=now,
         )
-        enabled = await asyncio.to_thread(
-            self._prompts_enabled, message.author_id, message.guild_id
+        text = f"-# Je retiens que {second_person(proposal.content)} ?"
+        return MemoryAsk(text, proposal_id=proposal.id)
+
+    async def _learn(
+        self, message: Inbound, fact: str, actor: Actor, now: datetime
+    ) -> MemoryAsk | None:
+        """Retient sans demander, remplace un fait que le nouveau contredit, laisse une trace.
+
+        Un fait sensible (santé, religion, argent…) ne part jamais seul : il est proposé.
+        """
+        if await self._sensitive(fact):
+            return await self._propose(message, fact, now)
+        found = await asyncio.to_thread(
+            self.store.search, fact, user_id=message.author_id, guild_id=message.guild_id, limit=6
         )
-        if not enabled:
+        own = [
+            item for item in found if item.scope == "user" and item.subject_id == message.author_id
+        ]
+        if any(close(item.content, fact) for item in own):
+            return None  # déjà connu : rien à retenir ni à signaler
+        old = await self._superseded(own, fact)
+        try:
+            if old is not None:
+                memory = await asyncio.to_thread(self.store.correct, actor, old.id, fact, now)
+            else:
+                memory = await asyncio.to_thread(
+                    self.store.remember,
+                    actor,
+                    scope="user",
+                    subject_id=message.author_id,
+                    guild_id=message.guild_id,
+                    content=fact,
+                    source="confirmed",
+                    now=now,
+                )
+        except (MemoryDenied, ValueError):
             return None
-        return MemoryAsk(proposal.id, f"-# Je retiens que {second_person(proposal.content)} ?")
+        await asyncio.to_thread(self.learned.mark, memory.id, now)
+        trace = f"-# 🧠 Retenu : {second_person(fact)}"
+        if old is not None:
+            trace += f" (au lieu de « {second_person(old.content)} »)"
+        return MemoryAsk(trace, learned_id=memory.id)
+
+    async def _sensitive(self, fact: str) -> bool:
+        if self._engine is None:
+            return False
+        verdict = await self._engine.resolve("fact_sensitivity", {"text": fact[:300]})
+        return verdict.value == "sensitive"
+
+    async def _superseded(self, own: list[Memory], fact: str) -> Memory | None:
+        """Un souvenir de la personne que ce fait remplace : même sujet, un seul peut être vrai."""
+        if self._engine is None:
+            return None
+        for item in own[:4]:
+            verdict = await self._engine.resolve(
+                "memory_conflict", {"new": fact[:300], "old": item.content[:300]}
+            )
+            if verdict.value == "replace":
+                return item
+        return None
+
+    async def _note_collective(self, message: Inbound, now: datetime) -> None:
+        """Un gag ou une habitude du groupe : proposé aux modérateurs, jamais retenu seul."""
+        fact = collective_fact(message.text)
+        if not fact or message.guild_id is None or not await self._worth(fact):
+            return
+        if await asyncio.to_thread(self._guild_knows, message.guild_id, fact):
+            return
+        await asyncio.to_thread(
+            self.store.propose,
+            scope="guild",
+            content=fact,
+            subject_user_id=None,
+            guild_id=message.guild_id,
+            channel_id=message.channel_id,
+            source_message_id=message.message_id,
+            now=now,
+        )
+
+    def _guild_knows(self, guild_id: int, fact: str) -> bool:
+        known = [item.content for item in self.store.list_guild(guild_id)]
+        known += [item.content for item in self.store.open_guild(guild_id)]
+        return any(close(item, fact) for item in known)
 
     async def _worth(self, text: str) -> bool:
         if self._engine is None:
@@ -134,22 +231,27 @@ class Memories:
         verdict = await self._engine.resolve("memory_worth_proposing", {"text": text[:500]})
         return verdict.value is True
 
-    def _prompts_enabled(self, user_id: int, guild_id: int | None) -> bool:
+    def learning_mode(self, user_id: int, guild_id: int | None) -> str:
+        """auto : retient seule ; ask : demande d'abord ; off : ne retient rien."""
         if guild_id is None:
-            return True
+            return "off"
         row = self._database.fetchone(
-            "SELECT memory_prompts FROM member_settings WHERE user_id = ? AND guild_id = ?",
+            "SELECT learning FROM member_settings WHERE user_id = ? AND guild_id = ?",
             (user_id, guild_id),
         )
-        return row is None or int(row["memory_prompts"]) == 1
+        return "auto" if row is None else str(row["learning"])
 
-    def set_prompts(self, user_id: int, guild_id: int, enabled: bool) -> None:
+    def set_learning(self, user_id: int, guild_id: int, mode: str) -> None:
+        if mode not in LEARNING:
+            raise ValueError(f"Mode inconnu : {mode}.")
         self._database.execute(
             """
-            INSERT INTO member_settings (user_id, guild_id, memory_prompts) VALUES (?, ?, ?)
-            ON CONFLICT(user_id, guild_id) DO UPDATE SET memory_prompts = excluded.memory_prompts
+            INSERT INTO member_settings (user_id, guild_id, memory_prompts, learning)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, guild_id) DO UPDATE SET
+                memory_prompts = excluded.memory_prompts, learning = excluded.learning
             """,
-            (user_id, guild_id, int(enabled)),
+            (user_id, guild_id, int(mode != "off"), mode),
         )
 
     def _vector_hits(

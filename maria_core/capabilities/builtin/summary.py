@@ -12,6 +12,7 @@ from maria_core.capabilities.ports import ChannelReader, HistoryWindow
 type Lines = Callable[[int], tuple[str, ...]]
 type Reader = Callable[[], ChannelReader | None]
 type Condense = Callable[[str, str], Awaitable[str]]
+type Away = Callable[[int, int], datetime | None]
 
 PARIS = ZoneInfo("Europe/Paris")
 DEFAULT_LIMIT = 250
@@ -25,19 +26,28 @@ _DESCRIPTION = (
     '« depuis 16h » : since="16:00" (une heure, pas une durée). « aujourd\'hui » : '
     'since="00:00". « les 3 dernières heures » : hours=3. Une demande précise (« ce qu\'a dit '
     "X », « les décisions ») va dans focus. channel_id pour un autre salon. Résume ensuite "
-    "en restant fidèle aux messages, sans rien inventer."
+    "en restant fidèle aux messages, sans rien inventer. « ce que j'ai raté », « qu'est-ce qui "
+    "s'est dit pendant que j'étais parti » : missed=true (depuis son dernier départ du salon, "
+    "sans qu'il ait à préciser de durée)."
 )
 
 
 def summary_capability(
-    transcript: Lines, reader: Reader, condense: Condense | None = None
+    transcript: Lines,
+    reader: Reader,
+    condense: Condense | None = None,
+    away: Away | None = None,
 ) -> Capability:
     async def run(context: Context, args: Mapping[str, Any]) -> Result:
+        channel_id = _channel(args, context)
+        now = datetime.now(UTC)
         try:
-            window = window_of(args, datetime.now(UTC))
+            window = window_of(args, now)
+            if args.get("missed") is True:
+                left = away(context.user_id, channel_id) if away is not None else None
+                window = missed_window(left, now)
         except ValueError as exc:
             return Result(ok=False, data={}, error=str(exc))
-        channel_id = _channel(args, context)
         lines = await _lines(context, channel_id, window, reader, transcript)
         if isinstance(lines, str):
             return Result(ok=False, data={}, error=lines)
@@ -63,6 +73,10 @@ def summary_capability(
                 "hours": {"type": "number", "minimum": 0.25, "maximum": 72},
                 "limit": {"type": "integer", "minimum": 5, "maximum": MAX_LIMIT},
                 "focus": {"type": "string", "description": "Ce qu'il faut en tirer"},
+                "missed": {
+                    "type": "boolean",
+                    "description": "true : depuis le dernier départ de la personne du salon",
+                },
             },
             "required": [],
         },
@@ -83,6 +97,21 @@ def window_of(args: Mapping[str, Any], now: datetime) -> HistoryWindow:
         after = now - timedelta(hours=min(float(hours), 72.0))
         return HistoryWindow(after=after, limit=MAX_LIMIT, label=f"{hours:g} dernières heures")
     return HistoryWindow(after=None, limit=limit, label=f"{limit} derniers messages")
+
+
+def missed_window(left: datetime | None, now: datetime) -> HistoryWindow:
+    """Depuis que la personne a quitté le salon, au plus 72 h. Rien à dire si elle était là."""
+    if left is None:
+        raise ValueError(
+            "Aucune trace de la dernière visite de la personne dans ce salon : demande-lui "
+            "depuis quand résumer."
+        )
+    if now - left > timedelta(hours=72):
+        left = now - timedelta(hours=72)
+    if now - left < timedelta(minutes=10):
+        raise ValueError("La personne était là il y a quelques minutes : rien à rattraper.")
+    label = f"depuis ton dernier passage ({_hhmm(left)}, {left.astimezone(PARIS):%d/%m})"
+    return HistoryWindow(after=left, limit=MAX_LIMIT, label=label)
 
 
 def last_clock(raw: str, now: datetime) -> datetime:

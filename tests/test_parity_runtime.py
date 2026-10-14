@@ -1,6 +1,7 @@
 """Ce que MARIA_R faisait en coulisses : cache des outils, galerie fusionnée, erreurs, heures."""
 
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -8,6 +9,7 @@ import discord
 import pytest
 
 from maria_core.capabilities import Capability, CapabilityRegistry, Context, Result, Risk
+from maria_core.capabilities.builtin.summary import missed_window
 from maria_core.capabilities.builtin.web import render_images
 from maria_core.capabilities.cache import ResultCache
 from maria_core.capabilities.runner import CACHE, invoke
@@ -17,9 +19,11 @@ from maria_core.db import Database
 from maria_core.discord.bot import on_app_command_error
 from maria_core.discord.commands.usage import usage_report
 from maria_core.discord.task_edit import when_changes
-from maria_core.llm.loop import LoopResult, ToolRecord
-from maria_core.llm.types import ToolCall
+from maria_core.llm.loop import LoopResult, ToolRecord, complete_turn
+from maria_core.llm.types import Completion, ToolCall
+from maria_core.social.seen import Seen
 from maria_core.ui.widgets import WidgetRegistry
+from tests.fakes import ScriptedClient
 
 
 def _context() -> Context:
@@ -142,4 +146,87 @@ async def test_usage_report_summarises_model_and_tool_calls(tmp_path) -> None:
     assert "**conversation** · m · 1 appel(s) · 2.5k → 300" in text
     assert "`get_weather` · 2 appel(s) · 400 ms · **1 échec(s)**" in text
     assert meta == "7 derniers jours"
+    database.close()
+
+
+async def test_independent_reads_run_together_and_keep_their_order() -> None:
+    started: list[str] = []
+    gate = asyncio.Event()
+
+    async def execute(call: ToolCall) -> Result:
+        started.append(call.name)
+        if len(started) == 2:
+            gate.set()
+        await asyncio.wait_for(gate.wait(), 1)
+        return Result(ok=True, data={"name": call.name})
+
+    calls = (
+        ToolCall(id="1", name="get_weather", arguments={}),
+        ToolCall(id="2", name="get_football", arguments={}),
+    )
+    client = ScriptedClient([Completion(text="", tool_calls=calls), Completion(text="Voilà")])
+    outcome = await complete_turn(
+        client,
+        [{"role": "user", "content": "météo et foot"}],
+        system="s",
+        tools=[{"type": "function", "function": {"name": "x"}}],
+        execute=execute,
+        parallel_safe=lambda name: True,
+    )
+    assert [record.name for record in outcome.records] == ["get_weather", "get_football"]
+    assert outcome.text == "Voilà"
+
+
+async def test_a_write_keeps_the_whole_batch_in_series() -> None:
+    order: list[str] = []
+
+    async def execute(call: ToolCall) -> Result:
+        order.append(f"start {call.name}")
+        order.append(f"end {call.name}")
+        return Result(ok=True, data={})
+
+    calls = (
+        ToolCall(id="1", name="remember_fact", arguments={}),
+        ToolCall(id="2", name="get_weather", arguments={}),
+    )
+    client = ScriptedClient([Completion(text="", tool_calls=calls), Completion(text="ok")])
+    await complete_turn(
+        client,
+        [{"role": "user", "content": "x"}],
+        system="s",
+        tools=[{"type": "function", "function": {"name": "x"}}],
+        execute=execute,
+        parallel_safe=lambda name: name != "remember_fact",
+    )
+    assert order == [
+        "start remember_fact",
+        "end remember_fact",
+        "start get_weather",
+        "end get_weather",
+    ]
+
+
+def test_what_was_missed_starts_when_the_person_left_the_room(tmp_path) -> None:
+    database = Database(tmp_path / "maria.db")
+    database.migrate()
+    seen = Seen(database)
+    start = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
+    assert seen.away_since(7, 3) is None
+    seen.touch(7, 3, start)
+    seen.touch(7, 3, start + timedelta(minutes=5))  # même visite
+    assert seen.away_since(7, 3) is None
+    back = start + timedelta(hours=5)
+    seen.touch(7, 3, back)  # revient après 5 h : la visite d'avant s'est terminée à 9 h 05
+    assert seen.away_since(7, 3) == start + timedelta(minutes=5)
+    seen.touch(7, 3, back + timedelta(minutes=10))
+    assert seen.away_since(7, 3) == start + timedelta(minutes=5)  # toujours la même visite
+    window = missed_window(seen.away_since(7, 3), back + timedelta(minutes=10))
+    assert window.after == start + timedelta(minutes=5)
+    assert "depuis ton dernier passage" in window.label
+    with pytest.raises(ValueError):
+        missed_window(None, back)
+    with pytest.raises(ValueError):
+        missed_window(back, back + timedelta(minutes=3))
+    far = missed_window(start - timedelta(days=9), back)
+    assert far.after == back - timedelta(hours=72)
     database.close()

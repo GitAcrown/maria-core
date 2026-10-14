@@ -1,5 +1,6 @@
 """Branche les capacités du noyau. Les médias restent des extensions."""
 
+from datetime import datetime
 from typing import Protocol
 
 from maria_core.capabilities import CapabilityRegistry
@@ -29,6 +30,14 @@ class _Transcript(Protocol):
     def transcript(self, channel_id: int) -> tuple[str, ...]: ...
 
 
+class _Seen(Protocol):
+    def away_since(self, user_id: int, channel_id: int) -> datetime | None: ...
+
+
+class _Social(Protocol):
+    seen: _Seen
+
+
 class BuiltinHost(Protocol):
     settings: Settings
     database: Database
@@ -40,6 +49,7 @@ class BuiltinHost(Protocol):
     channel_reader: ChannelReader | None
     objectives: Objectives
     memory: Memories
+    social: _Social
 
 
 def register_builtins(app: BuiltinHost, condense: Condense | None = None) -> None:
@@ -47,7 +57,12 @@ def register_builtins(app: BuiltinHost, condense: Condense | None = None) -> Non
         app.capabilities.register(capability)
     app.capabilities.register(about_capability(app.capabilities))
     app.capabilities.register(
-        summary_capability(app.conversation.transcript, lambda: app.channel_reader, condense)
+        summary_capability(
+            app.conversation.transcript,
+            lambda: app.channel_reader,
+            condense,
+            app.social.seen.away_since,
+        )
     )
     app.capabilities.register(python_capability(app.database))
     for capability in (*objective_capabilities(app.objectives), *memory_capabilities(app.memory)):

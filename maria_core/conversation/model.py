@@ -56,11 +56,12 @@ class AudioRef:
 
 @dataclass(frozen=True, slots=True)
 class FileRef:
-    """Fichier texte joint (code, notes, CSV). Lu seulement si on répond."""
+    """Pièce jointe qui n'est ni une image ni un audio. Lue seulement si on répond."""
 
     filename: str
     size: int
     load: Callable[[], Awaitable[bytes]]
+    content_type: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +127,8 @@ class Reply:
     cards: tuple[Card, ...] = ()
     footer: str = ""
     proposal_id: int | None = None
+    learned_id: int | None = None
+    trace: str = ""
     draft_objective_id: int | None = None
 
     @property

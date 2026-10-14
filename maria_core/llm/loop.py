@@ -1,5 +1,6 @@
 """Boucle d'un tour : le modèle répond, ou appelle des outils, jusqu'à six fois."""
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -17,6 +18,7 @@ MAX_TOOL_CALLS = 8
 _NUDGE = "[SYSTEM] Réponds maintenant, en une réponse finale."
 
 type ToolExecutor = Callable[[ToolCall], Awaitable[Result]]
+type ParallelSafe = Callable[[str], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +65,7 @@ async def complete_turn(
     execute: ToolExecutor,
     max_turns: int = MAX_TOOL_TURNS,
     first_choice: ToolChoice = "auto",
+    parallel_safe: ParallelSafe | None = None,
 ) -> LoopResult:
     turn = _Turn(messages=[{"role": "system", "content": system}], records=[])
     turn.messages.extend(dict(item) for item in history)
@@ -76,7 +79,7 @@ async def complete_turn(
             ok = False
             break
         if completion.tool_calls and allow_tools:
-            await _run_tools(turn, completion, execute)
+            await _run_tools(turn, completion, execute, parallel_safe)
             continue
         if turn.text or turn.records or turn.nudged or index + 1 >= max_turns:
             break
@@ -105,10 +108,26 @@ async def _ask(
     return completion
 
 
-async def _run_tools(turn: _Turn, completion: Completion, execute: ToolExecutor) -> None:
+async def _run_tools(
+    turn: _Turn,
+    completion: Completion,
+    execute: ToolExecutor,
+    parallel_safe: ParallelSafe | None = None,
+) -> None:
+    """Les lectures indépendantes partent ensemble ; une écriture remet tout en série.
+
+    Les résultats gardent l'ordre des appels, comme le modèle les a demandés.
+    """
     turn.messages.append(_assistant_message(completion))
-    for call in completion.tool_calls:
-        result = await _run_tool(execute, call, len(turn.records))
+    calls = completion.tool_calls
+    base = len(turn.records)
+    if parallel_safe is not None and len(calls) > 1 and all(parallel_safe(c.name) for c in calls):
+        results = await asyncio.gather(
+            *(_run_tool(execute, call, base + index) for index, call in enumerate(calls))
+        )
+    else:
+        results = [await _run_tool(execute, call, base + index) for index, call in enumerate(calls)]
+    for call, result in zip(calls, results, strict=True):
         turn.records.append(ToolRecord(call.name, dict(call.arguments), result))
         turn.messages.append(_tool_message(call, result))
 

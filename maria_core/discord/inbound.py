@@ -12,27 +12,10 @@ logger = logging.getLogger(__name__)
 
 _AUDIO_EXTENSIONS = (".mp3", ".wav", ".ogg", ".m4a", ".flac", ".webm", ".aac")
 _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
-_TEXT_EXTENSIONS = (
-    ".txt",
-    ".md",
-    ".py",
-    ".js",
-    ".ts",
-    ".html",
-    ".css",
-    ".json",
-    ".xml",
-    ".csv",
-    ".log",
-    ".yml",
-    ".yaml",
-    ".toml",
-    ".ini",
-    ".sql",
-)
 _VOICE_FLAG = 1 << 13
 _MAX_AUDIO_BYTES = 25 * 1024 * 1024
-_MAX_TEXT_FILE = 1024 * 1024
+_MAX_FILES = 8
+_MAX_IMAGES = 4
 _IMAGE_URL = re.compile(r"https?://\S+?\.(?:png|jpe?g|webp|gif)(?:\?\S*)?", re.IGNORECASE)
 
 
@@ -161,6 +144,10 @@ def _is_moderator(message: discord.Message) -> bool:
 
 
 def _images(message: discord.Message) -> tuple[ImageRef, ...]:
+    return _all_images(message)[:_MAX_IMAGES]
+
+
+def _all_images(message: discord.Message) -> tuple[ImageRef, ...]:
     refs = [
         ImageRef(url=image_url(item.url, item.filename or ""))
         for item in message.attachments
@@ -175,7 +162,7 @@ def _images(message: discord.Message) -> tuple[ImageRef, ...]:
         for media in (embed.image, embed.thumbnail):
             if media and media.url:
                 refs.append(ImageRef(url=image_url(media.url)))
-    return tuple(dict.fromkeys(refs))[:4]
+    return tuple(dict.fromkeys(refs))
 
 
 def _audio(message: discord.Message) -> AudioRef | None:
@@ -198,11 +185,17 @@ def _audio(message: discord.Message) -> AudioRef | None:
 
 
 def _files(message: discord.Message) -> tuple[FileRef, ...]:
+    """Tout ce qui n'est ni image ni audio ; `attachments` décide ensuite de ce qui se lit."""
     return tuple(
-        FileRef(filename=item.filename, size=item.size, load=item.read)
+        FileRef(
+            filename=item.filename or "fichier",
+            size=item.size,
+            load=item.read,
+            content_type=item.content_type or "",
+        )
         for item in message.attachments
-        if (item.filename or "").lower().endswith(_TEXT_EXTENSIONS) and item.size <= _MAX_TEXT_FILE
-    )[:3]
+        if not _is_image(item) and not _is_audio(item, message)
+    )[:_MAX_FILES]
 
 
 def _extras(message: discord.Message) -> tuple[str, ...]:
@@ -219,6 +212,9 @@ def _extras(message: discord.Message) -> tuple[str, ...]:
         found.append(f"[Sticker {sticker.name}]")
     if message.components and not message.content:
         found.append("[Vue interactive]")
+    dropped = len(_all_images(message)) - _MAX_IMAGES
+    if dropped > 0:
+        found.append(f"[{dropped} image(s) en plus, non vues : au-delà de {_MAX_IMAGES}]")
     return tuple(found[:6])
 
 

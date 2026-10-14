@@ -7,11 +7,11 @@ from contextlib import AbstractAsyncContextManager, nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+from maria_core.attachments import Digester
 from maria_core.capabilities import CapabilityRegistry
 from maria_core.config import Settings
 from maria_core.conversation.compose import UNAVAILABLE_TEXT, Composed, compose
 from maria_core.conversation.context import (
-    FILE_CHARS,
     ContextSource,
     can_stay_silent,
     is_media_only,
@@ -24,7 +24,7 @@ from maria_core.conversation.model import Action, AudioRef, Inbound, Policy, Rep
 from maria_core.conversation.policy import load_policy
 from maria_core.conversation.pressure import Pressure
 from maria_core.conversation.routing import decide
-from maria_core.conversation.turn import TurnInput, TurnRunner, read_files
+from maria_core.conversation.turn import TurnInput, TurnRunner
 from maria_core.db import Database
 from maria_core.decisions.engine import Decider
 from maria_core.llm.history import ChannelHistory, HistoryEntry
@@ -34,6 +34,7 @@ from maria_core.llm.types import ChatClient
 from maria_core.memory.model import MemoryAsk
 from maria_core.memory.service import Memories
 from maria_core.memory.text import explicit_fact
+from maria_core.profile.service import Profiles
 from maria_core.social.service import Social
 from maria_core.ui.render import split_message
 from maria_core.ui.widgets import WidgetRegistry
@@ -79,6 +80,8 @@ class ConversationService:
         memory: Memories | None = None,
         social: Social | None = None,
         sources: Sequence[ContextSource] = (),
+        profiles: Profiles | None = None,
+        digester: Digester | None = None,
     ) -> None:
         self._database = database
         self._client = client
@@ -90,6 +93,8 @@ class ConversationService:
         self._widgets = widgets or WidgetRegistry()
         self._memory = memory
         self._social = social
+        self._profiles = profiles
+        self._digester = digester
         self._sources = list(sources)
         self._turns = asyncio.Semaphore(_PARALLEL_TURNS)
         self._locks: dict[int, asyncio.Lock] = {}
@@ -101,6 +106,7 @@ class ConversationService:
             database=database,
             prompt=prompt,
             engine=engine,
+            slots=profiles,
         )
         self.drafts: DraftDesk | None = None
 
@@ -128,6 +134,7 @@ class ConversationService:
             return None
         if self._social is not None:
             self._social.note_addressed(message)
+        await self._learn_profile(message)
         self._history(message.channel_id).add(user_entry(message, addressed=True))
         if await self._react_instead(message, route):
             return None
@@ -258,7 +265,7 @@ class ConversationService:
         self, message: Inbound, policy: Policy, route: Route, thinking: Thinking | None
     ) -> Reply | None:
         history = self._history(message.channel_id)
-        files = await read_files(message, FILE_CHARS)
+        files = await self._digest(message)
         if files:
             history.promote(message.message_id, user_entry(message, addressed=True, files=files))
         extras = await self._extras(message)
@@ -299,6 +306,25 @@ class ConversationService:
             found.append(await asyncio.to_thread(self._memory.prompt_for, message))
         return [item for item in found if item]
 
+    async def _digest(self, message: Inbound) -> str:
+        """Fichiers et liens du message, lus d'office ; ce qui est illisible est annoncé."""
+        if self._digester is None or message.is_dm:
+            return ""
+        try:
+            return await self._digester.build(message)
+        except Exception:
+            logger.exception("Pièces jointes non lues pour %s", message.message_id)
+            return ""
+
+    async def _learn_profile(self, message: Inbound) -> None:
+        """Style de la personne et champs dits clairement, sans rien lui demander."""
+        if self._profiles is None or message.edited:
+            return
+        try:
+            await asyncio.to_thread(self._profiles.observe, message)
+        except Exception:
+            logger.exception("Profil non mis à jour pour %s", message.author_id)
+
     async def _note(self, message: Inbound) -> None:
         if self._social is not None:
             await self._social.note(message)
@@ -326,7 +352,8 @@ class ConversationService:
         ask: MemoryAsk | None,
     ) -> Reply | None:
         text = composed.text
-        if ask is not None:
+        traced = ask is not None and ask.learned_id is not None
+        if ask is not None and not traced:
             text = f"{text}\n\n{ask.text}".strip()
         if not text and not composed.cards:
             return None
@@ -348,6 +375,8 @@ class ConversationService:
             cards=composed.cards,
             footer=composed.footer,
             proposal_id=None if ask is None else ask.proposal_id,
+            learned_id=None if ask is None else ask.learned_id,
+            trace=ask.text if ask is not None and traced else "",
             draft_objective_id=_draft(outcome),
         )
 

@@ -13,6 +13,14 @@ _EXPLICIT = re.compile(
     "\\b(?:retiens(?:\\s+que)?|souviens-toi(?:\\s+que)?|n['\u2019]oublie pas que|remember that)\\b",
     re.IGNORECASE,
 )
+_COLLECTIVE = re.compile(
+    r"\b(?:on (?:a toujours|a l['\u2019]habitude|fait toujours|se retrouve|joue toujours)"
+    r"|chaque (?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|semaine|soir)"
+    r"|tous les (?:lundis|mardis|mercredis|jeudis|vendredis|samedis|dimanches|soirs|jours)"
+    r"|ici c['\u2019]est|sur ce serveur|notre (?:serveur|groupe|bande|tradition)"
+    r"|c['\u2019]est une tradition|running gag)\b",
+    re.IGNORECASE,
+)
 _SAME = 0.85
 _STOP = frozenset(
     {
@@ -143,6 +151,14 @@ def proposal_fact(text: str) -> str:
     if cleaned.endswith("?"):
         return ""
     return cleaned.strip(" .")
+
+
+def collective_fact(text: str) -> str:
+    """Une habitude ou un gag du groupe, dit en une phrase. Jamais une question."""
+    cleaned = " ".join((text or "").split())
+    if not 20 <= len(cleaned) <= 200 or cleaned.endswith("?"):
+        return ""
+    return cleaned.strip(" .") if _COLLECTIVE.search(cleaned) else ""
 
 
 def explicit_fact(text: str) -> str:

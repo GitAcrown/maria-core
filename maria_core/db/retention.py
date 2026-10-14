@@ -41,6 +41,7 @@ def purge(database: Database, now: datetime) -> dict[str, int]:
             "DELETE FROM objective_fetches WHERE at < ?",
             before(days=3),
         ),
+        "member_seen": ("DELETE FROM member_seen WHERE last_at < ?", before(days=14)),
         "objective_runs": (
             "DELETE FROM objective_runs WHERE finished_at IS NOT NULL AND finished_at < ?",
             before(days=_RUN_DAYS),
