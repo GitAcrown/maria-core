@@ -1,6 +1,6 @@
 import discord
 
-from maria_core.capabilities.builtin.layout import card_from_spec, clip
+from maria_core.capabilities.builtin.layout import card_from_spec, clip, render_draft
 from maria_core.discord import layout
 from maria_core.ui import emojis as icons
 from maria_core.ui.emojis import FALLBACKS, FOOTBALL, MOVIE, downgrade, emoji_id
@@ -58,3 +58,23 @@ def test_layout_wide_rules_bare_galleries_and_quiet_links() -> None:
     assert container.children[2].content == "[lien](<https://a.fr>)"
     assert isinstance(items[3], discord.ui.MediaGallery)
     assert items[3].items[0].description == "légende"
+
+
+def test_a_draft_is_a_small_card_under_the_comment_with_a_line_between() -> None:
+    data = {
+        "id": 14,
+        "kind": "Écoute",
+        "when": "quand on parle de « corset »",
+        "if": "",
+        "say": "Quelqu'un parle du film Le Corset",
+    }
+    rendered = render_draft(data)
+    views = layout.build_views(intro="Je te préviens si on en parle.", cards=rendered.cards)
+    kinds = [type(item).__name__ for item in views[0].children]
+    assert kinds == ["TextDisplay", "Separator", "Container"]
+    inside = views[0].children[2].children
+    assert [type(item).__name__ for item in inside] == ["TextDisplay", "TextDisplay"]
+    assert "**Quand** · quand on parle de « corset »" in inside[0].content
+    assert "**Message** · Quelqu'un parle du film Le Corset" in inside[0].content
+    assert inside[1].content == "-# Écoute · brouillon n°14 · réponds « oui » ou « non »"
+    assert not any(isinstance(item, discord.ui.Button) for item in views[0].walk_children())

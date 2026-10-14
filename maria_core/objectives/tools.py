@@ -12,7 +12,7 @@ from maria_core.objectives.compile import (
     compile_trigger,
     is_conditional,
 )
-from maria_core.objectives.labels import kind_label, op_label
+from maria_core.objectives.labels import condition_text, kind_label, op_label
 from maria_core.objectives.model import Objective, ObjectiveQuota, StaleObjective
 from maria_core.objectives.schedule import EVENT_TRIGGERS, describe, first_due, next_due
 from maria_core.objectives.schemas import create_schema, update_schema
@@ -65,7 +65,8 @@ def _create(service: Any) -> Callable[[Context, Mapping[str, Any]], Any]:
             data["hint"] = "Cet objectif existe déjà. Propose de le modifier."
         elif objective.status == "draft":
             data["hint"] = "Brouillon : explique en une phrase, il part après un oui."
-        return Result(ok=True, data=data)
+        draft = created and objective.status == "draft"
+        return Result(ok=True, data=data, widget="objective_draft" if draft else None)
 
     return run
 
@@ -254,6 +255,8 @@ def public(objective: Objective) -> dict[str, Any]:
         "status": objective.status,
         "when": describe(objective.trigger),
         "condition": dict(objective.condition) if objective.condition else None,
+        "if": condition_text(objective.condition),
+        "say": str(objective.action.get("text") or ""),
         "action": objective.action.get("type"),
         "next_run_at": objective.next_run_at.isoformat() if objective.next_run_at else None,
         "fires": objective.fires,

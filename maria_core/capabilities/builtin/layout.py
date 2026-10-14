@@ -74,6 +74,19 @@ def render_widget(data: Mapping[str, Any]) -> Rendered:
     return Rendered(cards=(built,), note=str(data.get("note") or ""))
 
 
+def render_draft(data: Mapping[str, Any]) -> Rendered:
+    """Ce qui sera créé, en petit, sous le commentaire. Aucun bouton : un « oui » valide."""
+    lines = [f"**Quand** · {data.get('when')}"] if data.get("when") else []
+    if data.get("if"):
+        lines.append(f"**Si** · {data['if']}")
+    if data.get("say"):
+        lines.append(f"**Message** · {clip(str(data['say']), 300)}")
+    kind = str(data.get("kind") or "Objectif")
+    hint = f"{kind} · brouillon n°{data.get('id')} · réponds « oui » ou « non »"
+    built = card(text("\n".join(lines)), footer(hint))
+    return Rendered(cards=(built,), note="Brouillon affiché, en attente d'un oui ou d'un non.")
+
+
 def render_table(data: Mapping[str, Any]) -> Rendered:
     table = str(data.get("table") or "")
     return Rendered(f"```\n{table}\n```" if table else "", note="Tableau affiché.")
