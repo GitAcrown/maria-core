@@ -7,11 +7,14 @@ from time import perf_counter
 
 from maria_core.capabilities.arguments import prepare_arguments
 from maria_core.capabilities.base import Capability, CapabilityRegistry, Context, Result, Risk
+from maria_core.capabilities.cache import ResultCache
 from maria_core.config import Settings
 from maria_core.db import Database
 from maria_core.llm.types import ToolCall
 
 logger = logging.getLogger(__name__)
+
+CACHE = ResultCache()
 
 _SETTING_FOR_KEY = {
     "OPENAI_API_KEY": "openai_api_key",
@@ -73,8 +76,14 @@ async def _invoke(
         arguments = prepare_arguments(capability.parameters, dict(call.arguments))
     except ValueError as exc:
         return Result(ok=False, data={}, error=str(exc))
+    if capability.cache_s:
+        cached = CACHE.get(call.name, arguments)
+        if cached is not None:
+            return cached
     try:
-        return await asyncio.wait_for(capability.run(context, arguments), capability.timeout_s)
+        result = await asyncio.wait_for(capability.run(context, arguments), capability.timeout_s)
+        CACHE.put(call.name, arguments, result, capability.cache_s)
+        return result
     except TimeoutError:
         logger.warning("Capacité %s : délai dépassé", call.name)
         return Result(ok=False, data={}, error="Délai dépassé.")

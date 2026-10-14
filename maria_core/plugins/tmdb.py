@@ -60,6 +60,7 @@ def media_capability(http: HttpClient, api_key: str) -> Capability:
             "required": ["query"],
         },
         risk=Risk.EXTERNAL,
+        cache_s=21600,
         run=run,
         requires=frozenset({"TMDB_API_KEY"}),
     )

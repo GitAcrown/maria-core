@@ -71,6 +71,7 @@ class Capability:
     requires: frozenset[str] = frozenset()
     requires_any: frozenset[str] = frozenset()
     timeout_s: float = 20.0
+    cache_s: float = 0.0
 
     def __post_init__(self) -> None:
         require_name(self.name, what="Capacité")
@@ -85,6 +86,7 @@ class Capability:
         _keys(self.name, self.requires)
         _keys(self.name, self.requires_any)
         _timeout(self.name, self.timeout_s)
+        _cache(self.name, self.cache_s)
         object.__setattr__(self, "description", self.description.strip())
         object.__setattr__(self, "parameters", dict(self.parameters))
         object.__setattr__(self, "timeout_s", float(self.timeout_s))
@@ -120,6 +122,11 @@ def _keys(name: str, keys: frozenset[str]) -> None:
 def _timeout(name: str, value: float) -> None:
     if isinstance(value, bool) or not isinstance(value, int | float) or not 0 < value <= 120:
         raise RegistryError(f"Délai invalide pour {name}.")
+
+
+def _cache(name: str, value: float) -> None:
+    if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 86400:
+        raise RegistryError(f"Durée de cache invalide pour {name}.")
 
 
 def _positive(value: int, label: str) -> None:

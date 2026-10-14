@@ -1,4 +1,4 @@
-"""Statut Discord tournant, lu dans DATA_DIR/statuses.txt. Rotation dans l'ordre du fichier.
+"""Statut Discord tournant, lu dans DATA_DIR/statuses.txt. Tirage au hasard sans répétition.
 
 Format : une entrée par ligne, `playing:`, `watching:`, `listening:` ou un texte libre.
 Les lignes vides et celles qui commencent par # sont ignorées.
@@ -6,10 +6,13 @@ Les lignes vides et celles qui commencent par # sont ignorées.
 
 import asyncio
 import logging
+import random
 from pathlib import Path
 
 import discord
 from discord.ext import commands
+
+from maria_core.discord.hub import say
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +52,7 @@ class PresenceCog(commands.Cog):
     def __init__(self, bot: commands.Bot, path: Path) -> None:
         self.bot = bot
         self.path = path
-        self._index = 0
+        self._last: tuple[str, str] | None = None
         self._task: asyncio.Task[None] | None = None
 
     async def cog_load(self) -> None:
@@ -63,17 +66,21 @@ class PresenceCog(commands.Cog):
         statuses = await asyncio.to_thread(load_statuses, self.path)
         if not statuses:
             return ""
-        kind, text = statuses[self._index % len(statuses)]
-        self._index += 1
+        pool = [item for item in statuses if item != self._last] or statuses
+        kind, text = random.choice(pool)
+        self._last = (kind, text)
         await self.bot.change_presence(activity=activity_of(kind, text))
         return text
 
     @commands.command(name="presence")
     @commands.is_owner()
     async def presence(self, ctx: commands.Context) -> None:
-        """Passe au statut suivant."""
+        """Tire un nouveau statut."""
         shown = await self.next_status()
-        await ctx.send(f"Statut : {shown}" if shown else f"Aucun statut dans {self.path.name}.")
+        if shown:
+            await say(ctx, "Statut", shown)
+        else:
+            await say(ctx, "Statut", f"*Aucun statut dans `{self.path.name}`.*")
 
     async def _loop(self) -> None:
         await self.bot.wait_until_ready()

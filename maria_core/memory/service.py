@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from maria_core.conversation.model import Inbound
 from maria_core.db import Database
 from maria_core.decisions.engine import Decider
-from maria_core.memory.model import Memory, MemoryAsk, Proposal
+from maria_core.memory.model import Memory, MemoryAsk
 from maria_core.memory.policy import Actor
 from maria_core.memory.rows import visible
 from maria_core.memory.store import MemoryStore
@@ -189,23 +189,6 @@ def label(memory: Memory, names: dict[int, str]) -> str:
         return "le serveur"
     name = names.get(memory.subject_id, "membre")
     return f"{name} ({memory.subject_id})"
-
-
-def render_proposals(proposals: tuple[Proposal, ...]) -> list[str]:
-    return [
-        f"- #{item.id} {'à revoir : ' if item.review_of else ''}{item.content}"
-        for item in proposals
-    ]
-
-
-def render_moi(memories: tuple[Memory, ...], proposals: tuple[Proposal, ...]) -> str:
-    lines = ["Tes souvenirs :"]
-    lines.extend(f"- #{item.id} {item.content}" for item in memories)
-    if not memories:
-        lines.append("- aucun")
-    lines.append("Propositions :")
-    lines.extend(render_proposals(proposals) or ["- aucune"])
-    return "\n".join(lines)
 
 
 def _render(

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from discord.ext import commands
 
 from maria_core.app import App
+from maria_core.discord.hub import say
 from maria_core.social.levels import set_level
 
 
@@ -23,17 +24,17 @@ class SocialCommands(commands.Cog):
     async def spontaneite(self, ctx: commands.Context, level: str) -> None:
         """off, quiet, normal ou chatty. Modérateurs."""
         if ctx.guild is None:
-            await ctx.send("Cette commande est pour un serveur.")
+            await say(ctx, "Action impossible", "Cette commande est pour un serveur.")
             return
         if not await _can_manage(ctx):
-            await ctx.send("Réservé aux modérateurs.")
+            await say(ctx, "Action impossible", "Réservé aux modérateurs.")
             return
         try:
             chosen = set_level(_app(self.bot).database, ctx.guild.id, level, _stamp())
         except ValueError as exc:
-            await ctx.send(str(exc))
+            await say(ctx, "Action impossible", str(exc))
             return
-        await ctx.send(f"Spontanéité : {chosen.name}.")
+        await say(ctx, "Spontanéité", f"**{chosen.name}**")
 
     @commands.command(name="why")
     @commands.is_owner()
@@ -41,9 +42,10 @@ class SocialCommands(commands.Cog):
         """Pourquoi MARIA a réagi, ou non, à un message."""
         message_id = _message_id(reference)
         if message_id is None:
-            await ctx.send("Donne l'identifiant ou le lien du message.")
+            await say(ctx, "Action impossible", "Donne l'identifiant ou le lien du message.")
             return
-        await ctx.send(_app(self.bot).social.explain(message_id)[:2000])
+        explained = _app(self.bot).social.explain(message_id)[:3500]
+        await say(ctx, "Pourquoi cette réaction ?", explained, meta=f"message {message_id}")
 
 
 def _message_id(reference: str) -> int | None:

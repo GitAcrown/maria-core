@@ -177,6 +177,12 @@ def card(heading: str, text: str = "", *, meta: str = "") -> discord.ui.LayoutVi
     return view
 
 
+async def say(ctx: object, heading: str, text: str = "", *, meta: str = "") -> None:
+    """Réponse d'une commande à préfixe, en carte comme les commandes slash."""
+    send = getattr(ctx, "send")  # noqa: B009
+    await send(view=card(heading, text, meta=meta), allowed_mentions=NO_PINGS)
+
+
 async def answer(
     interaction: discord.Interaction, heading: str, text: str = "", *, meta: str = ""
 ) -> None:

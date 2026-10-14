@@ -25,6 +25,7 @@ from maria_core.memory.policy import Actor
 from maria_core.memory.store import MemoryDenied
 
 PAGE = 15
+_RED = discord.ButtonStyle.danger
 _SOURCES = {"explicit": "dit explicitement", "proposal": "proposition acceptée"}
 
 
@@ -70,7 +71,9 @@ class MemoryHub(Hub):
         )
 
     def build(self) -> None:
-        if self.screen == "memory":
+        if self.screen == "reset":
+            self._reset()
+        elif self.screen == "memory":
             self._memory()
         elif self.screen == "proposal":
             self._proposal()
@@ -121,6 +124,8 @@ class MemoryHub(Hub):
                 Action("←", self._turn(-1), disabled=self.page == 0),
                 Action("→", self._turn(1), disabled=self.page >= total - 1),
             ]
+        if self.state.memories and self._may_edit() and self.tab == "memories":
+            controls.append(Action("Tout effacer", self._ask_reset, style=_RED))
         if controls:
             rows.append(discord.ui.ActionRow(*controls))
         return rows
@@ -173,6 +178,39 @@ class MemoryHub(Hub):
                 Action("Retour", self._back),
             ),
         )
+
+    def _reset(self) -> None:
+        who = "du serveur" if self.state.collective else "sur toi"
+        count = len(self.state.memories)
+        self.set_layout(
+            [
+                title("Tout effacer ?", f"{count} souvenir(s) {who}"),
+                wide(),
+                body(
+                    "Effacer **tous** les souvenirs "
+                    + ("du serveur" if self.state.collective else "que MARIA a sur toi")
+                    + " ?\n-# Ils restent récupérables un mois, puis disparaissent."
+                ),
+            ],
+            discord.ui.ActionRow(
+                Action("Oui, tout effacer", self._confirm_reset, style=discord.ButtonStyle.danger),
+                Action("Annuler", self._back),
+            ),
+        )
+
+    async def _ask_reset(self, interaction: discord.Interaction) -> None:
+        self.screen = "reset"
+        await self.refresh(interaction)
+
+    async def _confirm_reset(self, interaction: discord.Interaction) -> None:
+        store, now = self.app.memory.store, self.app.memory.now()
+        memories = self.state.memories
+
+        def wipe() -> None:
+            for item in memories:
+                store.forget(self.actor, item.id, now)
+
+        await self.act(interaction, wipe, f"{len(memories)} souvenir(s) effacé(s).")
 
     def _heading(self) -> str:
         return f"Mémoire · {self.state.name}"

@@ -145,7 +145,7 @@ async def test_task_hub_names_each_kind_and_confirms_deletion() -> None:
     assert "-# Surveillance · en veille" in text
     hub.selected, hub.screen = 2, "detail"
     hub.build()
-    assert _labels(hub) == ["Pause", "Passer une fois", "Supprimer", "Retour"]
+    assert _labels(hub) == ["Modifier", "Pause", "Passer une fois", "Supprimer", "Retour"]
     hub.screen, hub.pending = "confirm", "cancel"
     hub.build()
     assert "## Supprimer ?" in _texts(hub)
