@@ -13,6 +13,7 @@ from maria_core.capabilities.page import Fetched
 from maria_core.config import Settings
 from maria_core.conversation.model import AudioRef, FileRef, Inbound
 from maria_core.conversation.persona import clock_section
+from maria_core.conversation.pressure import Pressure
 from maria_core.conversation.service import UNAVAILABLE_TEXT, ConversationService
 from maria_core.db import Database
 from maria_core.decisions.engine import Decider
@@ -416,3 +417,11 @@ async def test_links_files_and_profile_reach_the_model(tmp_path: Path) -> None:
     assert "- clip.mp4 : vidéo" in seen
     assert "NON LISIBLE" in seen
     database.close()
+
+
+def test_talking_to_maria_elsewhere_does_not_close_the_door_here() -> None:
+    pressure = Pressure()
+    # Léa a une réponse dans le salon 1 ; dans le salon 2 elle n'a écrit qu'un message.
+    assert pressure.allow(7, 1, author_pace=1, channel_pace=1)
+    assert not pressure.allow(7, 1, author_pace=1, channel_pace=1)
+    assert pressure.allow(7, 2, author_pace=1, channel_pace=1)
