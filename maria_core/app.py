@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 
+from maria_core.attachments import Digester
 from maria_core.capabilities import CapabilityRegistry
 from maria_core.capabilities.builtin.discord_info import discord_capabilities
 from maria_core.capabilities.builtin.polls import PollStore, poll_capability, poll_context
 from maria_core.capabilities.http import UrllibHttpClient
+from maria_core.capabilities.page import Fetched, fetch_raw
 from maria_core.capabilities.ports import ChannelReader, GuildDirectory, PollPoster
 from maria_core.capabilities.register import register_builtins
 from maria_core.commands import CommandCatalog
@@ -92,6 +94,7 @@ class App:
             social=self.social,
             sources=(self._polls, self.profiles.prompt_for),
             profiles=self.profiles,
+            digester=Digester(self._fetch_link),
         )
         self.drafts = Drafts(self.objectives, self.engine)
         self.conversation.drafts = self.drafts
@@ -200,6 +203,11 @@ class App:
             return ""
         lines = [f"- {label(item, {})} : {item.content}" for item in facts]
         return "PROFIL DU DESTINATAIRE :\n" + "\n".join(lines)
+
+    async def _fetch_link(self, url: str) -> Fetched:
+        """Page d'un lien du message : un PDF peut être plus lourd qu'une page web."""
+        heavy = url.lower().split("?", 1)[0].endswith(".pdf")
+        return await fetch_raw(self.http, url, max_bytes=10_000_000 if heavy else 2_000_000)
 
     def _polls(self, message: Inbound) -> str:
         if message.guild_id is None:

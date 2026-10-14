@@ -1,6 +1,5 @@
 """Un tour avec le modèle : prompt, outils, garde-fous, nouvel essai sans image."""
 
-import asyncio
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -167,30 +166,3 @@ def _context(message: Inbound) -> Context:
         text=message.text,
         author_name=message.author_name,
     )
-
-
-async def read_files(message: Inbound, limit: int) -> str:
-    """Contenu des fichiers texte joints, borné. Vide si rien de lisible."""
-    blocks: list[str] = []
-    for item in message.files:
-        try:
-            raw = await item.load()
-        except Exception:
-            logger.warning("Fichier %s illisible", item.filename, exc_info=True)
-            continue
-        text = await asyncio.to_thread(_decode, raw)
-        if not text:
-            continue
-        clipped = text if len(text) <= limit else text[:limit] + "\n… [tronqué]"
-        extension = item.filename.rsplit(".", 1)[-1] if "." in item.filename else "txt"
-        blocks.append(f"[Fichier {item.filename}]\n```{extension}\n{clipped}\n```")
-    return "\n".join(blocks)
-
-
-def _decode(raw: bytes) -> str:
-    for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
-        try:
-            return raw.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return ""

@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
 from maria_core.capabilities.http import HttpClient, HttpError
@@ -13,14 +14,24 @@ MAX_REDIRECTS = 5
 _REDIRECTS = frozenset({301, 302, 303, 307, 308})
 
 
-async def fetch_text(
+@dataclass(frozen=True, slots=True)
+class Fetched:
+    """Ce qu'une adresse a rendu : octets bruts, type annoncé, adresse finale."""
+
+    body: bytes
+    content_type: str
+    url: str
+    charset: str = "utf-8"
+
+
+async def fetch_raw(
     http: HttpClient,
     url: str,
     *,
     resolve: Resolver = assert_public_host,
     max_bytes: int = 1_000_000,
-) -> tuple[str, str]:
-    """(texte, URL finale). Lève ValueError si la page reste illisible."""
+) -> Fetched:
+    """Octets bruts d'une adresse publique. Lève ValueError si elle reste illisible."""
     current = safe_url(url)
     for _ in range(MAX_REDIRECTS + 1):
         await asyncio.to_thread(resolve, urlparse(current).hostname or "")
@@ -36,12 +47,25 @@ async def fetch_text(
             continue
         if response.status != 200:
             raise ValueError(f"Page illisible (HTTP {response.status}).")
-        raw = response.body.decode(_charset(response.headers), errors="replace")
-        text = await asyncio.to_thread(html_to_text, raw)
-        if not text:
-            raise ValueError("Page vide.")
-        return text, current
+        kind = _header(response.headers, "content-type").lower()
+        return Fetched(response.body, kind, current, _charset(kind))
     raise ValueError("Trop de redirections.")
+
+
+async def fetch_text(
+    http: HttpClient,
+    url: str,
+    *,
+    resolve: Resolver = assert_public_host,
+    max_bytes: int = 1_000_000,
+) -> tuple[str, str]:
+    """(texte, URL finale). Lève ValueError si la page reste illisible."""
+    page = await fetch_raw(http, url, resolve=resolve, max_bytes=max_bytes)
+    raw = page.body.decode(page.charset, errors="replace")
+    text = await asyncio.to_thread(html_to_text, raw)
+    if not text:
+        raise ValueError("Page vide.")
+    return text, page.url
 
 
 def _header(headers: object, name: str) -> str:
@@ -53,8 +77,7 @@ def _header(headers: object, name: str) -> str:
     return ""
 
 
-def _charset(headers: object) -> str:
-    kind = _header(headers, "content-type").lower()
+def _charset(kind: str) -> str:
     if "charset=" in kind:
         charset = kind.split("charset=", 1)[1].split(";", 1)[0].strip()
         try:
