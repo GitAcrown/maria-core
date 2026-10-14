@@ -16,10 +16,10 @@ import asyncio
 import logging
 from pathlib import Path
 
-from maria_core import __version__
+from maria_core import __version__, supervisor
 from maria_core.app import App
 from maria_core.config import Settings
-from maria_core.discord.bot import MariaBot
+from maria_core.discord.bot import MariaBot, fatal_errors
 from maria_core.errors import ConfigError, MariaError
 from maria_core.journal import configure_logging
 
@@ -34,7 +34,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Ouvre la base et charge les extensions, sans se connecter à Discord.",
     )
     parser.add_argument("--env-file", type=Path, default=None)
+    parser.add_argument(
+        "--no-restart",
+        action="store_true",
+        help="Ne relance pas le bot après un plantage (par exemple si systemd s'en charge).",
+    )
     args = parser.parse_args(argv)
+    if not (args.check or args.no_restart or supervisor.is_child()):
+        return supervisor.run(supervisor.child_command(argv if argv is not None else sys.argv[1:]))
     try:
         settings = Settings.load(env_file=args.env_file)
     except ConfigError as exc:
@@ -49,10 +56,20 @@ def main(argv: list[str] | None = None) -> int:
         asyncio.run(_serve(settings))
     except KeyboardInterrupt:
         return 0
+    except ConfigError as exc:
+        logger.error("Configuration invalide : %s", exc)
+        print(str(exc), file=sys.stderr)
+        return 2
     except MariaError as exc:
         logger.exception("Démarrage impossible")
         print(str(exc), file=sys.stderr)
         return 1
+    except fatal_errors() as exc:
+        logger.error("Discord refuse la connexion : %s", exc)
+        print(
+            f"Discord refuse la connexion ({exc}) : vérifie TOKEN et les intents.", file=sys.stderr
+        )
+        return 2
     return 0
 
 

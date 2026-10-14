@@ -25,7 +25,9 @@ python -m maria_core --check --env-file .env
 python -m maria_core --env-file .env
 ```
 
-`--check` ouvre la base et charge les extensions, sans se connecter à Discord. Après un premier lancement, `5!sync` publie les commandes slash.
+`--check` ouvre la base et charge les extensions, sans se connecter à Discord.
+
+**Relance automatique** : `python -m maria_core` surveille le bot. S'il plante, il est relancé après 5 s, puis 10 s, 20 s, 40 s… jusqu'à 15 min entre deux tentatives ; une fois resté en vie 10 min, l'attente repart de 5 s. Les arrêts voulus (`5!shutdown`, Ctrl+C) et les réglages à corriger (jeton absent ou refusé par Discord, intents manquants) ne sont pas relancés. `5!restart` et `5!update` continuent de fonctionner. Avec `--no-restart`, le bot ne se relance pas lui-même (utile si systemd s'en charge déjà). Les messages de la supervision sont préfixés `[supervision]` sur la sortie d'erreur. Après un premier lancement, `5!sync` publie les commandes slash.
 
 ## Ce que fait MARIA
 
