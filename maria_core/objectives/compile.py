@@ -14,6 +14,7 @@ PRICE_CONDITIONS = frozenset(
 )
 _VOICE_EVENTS = frozenset({"join", "leave", "stream"})
 _AUTHORS = frozenset({"any", "self", "others"})
+_MEDIA = frozenset({"image", "video", "audio", "file"})
 
 
 def compile_trigger(
@@ -73,8 +74,6 @@ def check_plan(
         raise ValueError("Une condition de prix demande action_type=fetch_then avec une url.")
     if condition is not None and condition.get("type") == "page_changed" and not fetching:
         raise ValueError("page_changed demande action_type=fetch_then avec une url ou une query.")
-    if kind == "on_message" and (condition is None or condition.get("type") != "judge"):
-        raise ValueError("on_message demande une condition judge, sinon chaque message alerte.")
     if fetching and kind == "interval" and int(trigger.get("every_s") or 0) < MIN_FETCH_INTERVAL_S:
         raise ValueError("Une veille web se vérifie au plus toutes les 6 h.")
 
@@ -165,8 +164,46 @@ def _topic(args: Mapping[str, Any], _now: datetime | None) -> dict[str, Any]:
     return trigger
 
 
-def _message(args: Mapping[str, Any], _now: datetime | None) -> dict[str, Any]:
-    return {"type": "on_message", "author": _author(args)}
+def _mention(args: Mapping[str, Any], _now: datetime | None) -> dict[str, Any]:
+    trigger: dict[str, Any] = {"type": "on_mention", "author": _author(args)}
+    target = _identifier(args.get("target_user_id"))
+    if target is not None:
+        trigger["user_id"] = target
+    return trigger
+
+
+def _post(args: Mapping[str, Any], _now: datetime | None) -> dict[str, Any]:
+    target = _identifier(args.get("target_user_id"))
+    if target is None:
+        raise ValueError(
+            "on_post : indique target_user_id, la personne dont tu guettes les messages."
+        )
+    return {"type": "on_post", "user_id": target}
+
+
+def _link(args: Mapping[str, Any], _now: datetime | None) -> dict[str, Any]:
+    trigger: dict[str, Any] = {"type": "on_link", "author": _author(args)}
+    pattern = " ".join(str(args.get("pattern") or "").split())[:100]
+    if pattern:
+        trigger["pattern"] = pattern
+    return trigger
+
+
+def _attachment(args: Mapping[str, Any], _now: datetime | None) -> dict[str, Any]:
+    media = str(args.get("media") or "")
+    if media and media not in _MEDIA:
+        raise ValueError("media : image, video, audio ou file.")
+    trigger: dict[str, Any] = {"type": "on_attachment", "author": _author(args)}
+    if media:
+        trigger["media"] = media
+    return trigger
+
+
+def _reaction(args: Mapping[str, Any], _now: datetime | None) -> dict[str, Any]:
+    emoji = str(args.get("emoji") or "").strip()
+    if not emoji:
+        raise ValueError("on_reaction : indique l'emoji guetté (emoji).")
+    return {"type": "on_reaction", "emoji": emoji[:64], "author": _author(args)}
 
 
 def _voice(args: Mapping[str, Any], _now: datetime | None) -> dict[str, Any]:
@@ -189,7 +226,11 @@ _TRIGGERS: dict[str, Callable[[Mapping[str, Any], datetime | None], dict[str, An
     "weekly": _weekly,
     "interval": _interval,
     "on_topic": _topic,
-    "on_message": _message,
+    "on_mention": _mention,
+    "on_post": _post,
+    "on_link": _link,
+    "on_attachment": _attachment,
+    "on_reaction": _reaction,
     "on_voice": _voice,
 }
 
