@@ -39,8 +39,8 @@ python -m maria_core --env-file .env
 - **Vues** : météo, films, jeux, morceaux, matchs, transports et images s'affichent en cartes Discord (Components v2). MARIA peut aussi composer une vue sur mesure (`render_widget`) ou un tableau (`render_table`).
 - **Objectifs** : rappels (« dans 10 min », « tous les lundis à 9 h »), récaps rédigés avec ses outils, veilles de page ou de prix, écoute d'un mot, d'un sujet ou d'un vocal. Un rappel isolé ou une écoute unique part tout de suite. Ce qui peut devenir pénible (rappel récurrent, écoute répétée, veille de page ou de prix) est un brouillon : un « oui » ou un « non » dans le salon le tranche (MARIA l'attend 5 minutes, sans bouton, puis l'annule d'elle-même).
 - **Fichiers et liens lus d'office** : texte, code, Word, PDF (avec `pypdf`) et pages web citées dans un message qui lui est adressé. Ce qu'elle ne peut pas lire (vidéo, archive, réseau social fermé, audio non transcrit, page sans texte) est annoncé comme tel : elle le dit au lieu de deviner.
-- **Mémoire silencieuse** : un fait clair sur toi (« je suis végétarien ») est retenu sans question, avec une trace « 🧠 Retenu : … » et un bouton Annuler. Un nouveau fait qui contredit un ancien le remplace (l'ancien se retrouve avec Annuler). Santé, religion, orientation, argent, justice : jamais retenu sans demander. Un gag ou une habitude du groupe est proposé aux modérateurs dans `/global`. `/preferences apprentissage` : automatique, « demande-moi d'abord » ou rien. `/moi` montre le résumé, tout ce qu'elle sait, et l'onglet « Appris récemment ».
-- **Profil** : ville, équipe de foot, arrêt habituel, et façon de te parler (longueur, ton, emojis). « Météo chez moi », « le match de mon équipe » ou « mon métro » marchent sans question, et la réponse dit ce qui vient du profil. Les champs se règlent dans `/profil` ou à la parole ; le style se déduit de la longueur et du ton de tes messages (jamais de leur contenu).
+- **Mémoire silencieuse** : un fait clair sur toi (« je suis végétarien ») est retenu sans question, avec une trace « 🧠 Retenu : … » et un bouton Annuler. Un nouveau fait qui contredit un ancien le remplace (l'ancien se retrouve avec Annuler). Santé, religion, orientation, argent, justice : jamais retenu sans demander. Un gag ou une habitude du groupe est proposé aux modérateurs dans `/global`. `/preferences apprentissage` : automatique, « demande-moi d'abord » ou rien. `/moi` réunit, en onglets : le profil, le résumé et les souvenirs, « Appris récemment » et « À valider ».
+- **Profil** : ville, équipe de foot, arrêt habituel, et façon de te parler (longueur, ton, emojis). « Météo chez moi », « le match de mon équipe » ou « mon métro » marchent sans question, et la réponse dit ce qui vient du profil. Les champs se règlent dans l'onglet Profil de `/moi` ou à la parole ; le style se déduit de la longueur et du ton de tes messages (jamais de leur contenu).
 - **Ce que j'ai raté** : « qu'est-ce que j'ai raté ? » résume depuis ton dernier départ du salon, sans durée à préciser.
 - **Vérification discrète** : une réponse qui donne des faits d'actualité sans avoir cherché est revérifiée une fois avec un outil, avec le même ton.
 - **Rapidité** : les lectures indépendantes d'un même tour (météo et foot, deux recherches d'images…) partent en parallèle ; les résultats publics sont mis en cache.
@@ -52,8 +52,8 @@ Slash (après `5!sync`) :
 
 | Commande | Rôle |
 |---|---|
-| `/moi`, `/global` | Résumé de ce que MARIA sait, souvenirs, propositions, modifier, oublier, tout effacer |
-| `/profil` | Ce que MARIA sait de toi (ville, équipe, arrêt) et comment elle te parle : tout se voit et se change |
+| `/moi` | Tout ce que MARIA sait de toi : profil (ville, équipe, arrêt, façon de te parler), souvenirs, appris récemment, à valider ; modifier, oublier, tout effacer |
+| `/global` | Souvenirs du serveur : résumé, propositions, modifier, oublier |
 | `/programmes` | Rappels, écoutes et surveillances : modifier, pause, reprise, saut, confirmation, suppression, tout supprimer |
 | `/info` | Réglages du salon et outils disponibles |
 | `/chatbot mode\|forget\|everyone\|autotranscribe\|python\|spontaneite\|limite` | Réglages, modérateurs |

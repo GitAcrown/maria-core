@@ -16,8 +16,8 @@ from maria_core.conversation.policy import (
     save_transcribe,
 )
 from maria_core.discord.hub import answer, card, refuse
+from maria_core.discord.me_menu import open_me
 from maria_core.discord.memory_menu import open_memory
-from maria_core.discord.profile_menu import open_profile
 from maria_core.discord.task_menu import open_tasks
 from maria_core.memory.service import LEARNING
 from maria_core.social.levels import LEVELS, set_level, set_member_level
@@ -57,9 +57,11 @@ class PublicCommands(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="moi", description="Tes souvenirs et tes propositions")
+    @app_commands.command(
+        name="moi", description="Ce que MARIA sait de toi : profil, souvenirs, propositions"
+    )
     async def moi(self, interaction: discord.Interaction) -> None:
-        await open_memory(interaction, _app(self.bot), collective=False)
+        await open_me(interaction, _app(self.bot))
 
     @app_commands.command(name="global", description="Souvenirs du serveur")
     @app_commands.guild_only()
@@ -68,12 +70,6 @@ class PublicCommands(commands.Cog):
             await refuse(interaction, "Disponible sur un serveur.")
             return
         await open_memory(interaction, _app(self.bot), collective=True)
-
-    @app_commands.command(
-        name="profil", description="Ce que MARIA sait de toi et comment elle te parle"
-    )
-    async def profile(self, interaction: discord.Interaction) -> None:
-        await open_profile(interaction, _app(self.bot))
 
     @app_commands.command(name="programmes", description="Tes rappels, écoutes et surveillances")
     async def tasks(self, interaction: discord.Interaction) -> None:

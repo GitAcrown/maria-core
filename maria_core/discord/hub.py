@@ -19,9 +19,12 @@ type Pick = Callable[[discord.Interaction, str], Awaitable[None]]
 class Hub(discord.ui.LayoutView):
     """Base des menus éphémères. Seule la personne qui l'a ouvert peut cliquer."""
 
-    def __init__(self, *, viewer_id: int, timeout: float | None = MENU_TIMEOUT) -> None:
+    def __init__(
+        self, *, viewer_id: int, timeout: float | None = MENU_TIMEOUT, host: "Hub | None" = None
+    ) -> None:
         super().__init__(timeout=timeout)
         self.viewer_id = viewer_id
+        self.host = host  # un panneau est dessiné par son hôte, qui garde les onglets
         self.message: discord.InteractionMessage | None = None
 
     def build(self) -> None:
@@ -35,14 +38,20 @@ class Hub(discord.ui.LayoutView):
     ) -> None:
         """Comme dans CRIT : les onglets (`above`) au-dessus de la carte, puis, dans un seul
         conteneur, le contenu, un trait fin et les contrôles."""
-        self.clear_items()
-        for item in above:
-            self.add_item(item)
         children = list(body)
         if rows:
             children.append(thin())
             children.extend(rows)
-        self.add_item(discord.ui.Container(*children))
+        card = discord.ui.Container(*children)
+        if self.host is not None:
+            self.host.place([card])
+        else:
+            self.place([*above, card])
+
+    def place(self, items: Sequence[discord.ui.Item]) -> None:
+        self.clear_items()
+        for item in items:
+            self.add_item(item)
 
     async def open(self, interaction: discord.Interaction) -> None:
         self.build()
@@ -58,6 +67,9 @@ class Hub(discord.ui.LayoutView):
             self.message = None
 
     async def refresh(self, interaction: discord.Interaction) -> None:
+        if self.host is not None:
+            await self.host.refresh(interaction)
+            return
         self.build()
         if interaction.response.is_done():
             await interaction.edit_original_response(view=self, allowed_mentions=NO_PINGS)

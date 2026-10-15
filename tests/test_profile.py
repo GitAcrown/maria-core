@@ -158,7 +158,7 @@ async def test_a_tool_reads_the_profile_when_asked_and_says_so(tmp_path: Path) -
     other = await call("Paris")
     assert other.ok and "profile_used" not in other.data
     nobody = await call("@profil", user=9)
-    assert not nobody.ok and "/profil" in nobody.error
+    assert not nobody.ok and "/moi" in nobody.error
     database.close()
 
 
@@ -187,13 +187,8 @@ async def test_the_profile_menu_shows_values_and_where_they_come_from(tmp_path: 
     assert "## Profil · Lea" in texts
     assert "**Ville** · Lyon  -# réglé par toi" in texts
     assert "**Équipe de foot** · OM  -# appris par MARIA, modifiable" in texts
+    assert "**Ton** · *par défaut*" in texts
     assert len(list(hub.walk_children())) <= 40
-    hub.tab = "style"
-    hub.build()
-    style = " ".join(
-        item.content for item in hub.walk_children() if isinstance(item, discord.ui.TextDisplay)
-    )
-    assert "**Ton** · *par défaut*" in style and "**Ville**" not in style
     hub.selected, hub.screen = "city", "slot"
     hub.build()
     labels = [

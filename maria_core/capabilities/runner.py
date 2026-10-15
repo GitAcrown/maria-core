@@ -144,7 +144,7 @@ def _fill(
             label = slots.label(key) if slots is not None else key
             return (
                 f"Le profil n'a pas de champ « {label} » : demande-le à la personne "
-                "(elle peut aussi le régler avec /profil)."
+                "(elle peut aussi le régler dans /moi, onglet Profil)."
             )
         raw[argument] = found
         used.append((key, slots.label(key) if slots is not None else key, found))

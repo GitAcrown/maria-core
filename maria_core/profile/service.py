@@ -76,7 +76,8 @@ class Profiles:
             return ""
         name = message.author_name or "la personne"
         head = (
-            f"PROFIL DE {name} (elle le voit et le règle avec /profil). Pour une demande sur "
+            f"PROFIL DE {name} (elle le voit et le règle dans /moi, onglet Profil). "
+            "Pour une demande sur "
             "« chez moi », « mon équipe », « mon arrêt », passe la valeur @profil à l'outil :"
         )
         return "\n".join([head, *lines])
