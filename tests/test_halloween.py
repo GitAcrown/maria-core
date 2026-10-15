@@ -1,7 +1,7 @@
 """Bonbons ou sort : l'outil n'existe que pendant l'événement, et le tirage est celui du code."""
 
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from maria_core.app import App
@@ -14,6 +14,8 @@ from maria_core.plugins.halloween import (
     halloween_capability,
     in_season,
     render_halloween,
+    result_text,
+    status_text,
 )
 from maria_core.ui.emojis import FALLBACKS
 
@@ -54,27 +56,64 @@ def test_the_model_only_sees_the_tool_during_the_event(app: App) -> None:
     assert "trick_or_treat" not in [item.name for item in available(app.capabilities, settings)]
 
 
-async def test_a_ring_gives_candies_or_a_trick_and_is_limited_per_day(app: App) -> None:
-    app.database.execute(halloween._TABLE)
-    now = [_at("2026-10-31")]
+async def test_one_ring_every_three_hours_and_four_a_day(app: App) -> None:
+    halloween.ensure_table(app.database)
+    now = [_at("2026-10-31", 8)]
     tool = halloween_capability(app.database, clock=lambda: now[0], rng=random.Random(4))
-    outcomes = []
-    for _ in range(RINGS_PER_DAY):
-        result = await tool.run(_context(), {"action": "ring"})
-        assert result.ok and result.widget == "trick_or_treat"
-        outcomes.append(result.data["outcome"])
-    assert set(outcomes) <= {"treat", "trick"}
-    closed = await tool.run(_context(), {"action": "ring"})
-    assert closed.data["outcome"] == "closed" and closed.data["rings_left"] == 0
+    first = await tool.run(_context(), {"action": "ring"})
+    assert first.ok and first.widget == "trick_or_treat"
+    assert first.data["outcome"] in {"treat", "trick"} and first.data["rings_left"] == 3
+    reopen = int((now[0] + timedelta(hours=3)).timestamp())
+    assert first.data["next_at"] == reopen
+    again = await tool.run(_context(), {"action": "ring"})
+    assert again.data["outcome"] == "closed" and again.data["reason"] == "wait"
+    assert again.data["next_at"] == reopen and again.data["rings_left"] == 3
+    assert f"<t:{reopen}:R>" in result_text(again.data)
     other = await tool.run(_context(user=8, name="Paul"), {"action": "ring"})
     assert other.data["outcome"] != "closed"
-    now[0] = _at("2026-11-01")
-    again = await tool.run(_context(), {"action": "ring"})
-    assert again.data["outcome"] != "closed" and again.data["rings_left"] == RINGS_PER_DAY - 1
+    for hour in (11, 14, 17):
+        now[0] = _at("2026-10-31", hour)
+        result = await tool.run(_context(), {"action": "ring"})
+        assert result.data["outcome"] != "closed"
+    assert result.data["rings_left"] == 0 and result.data["next_at"] == 0
+    now[0] = _at("2026-10-31", 23)
+    full = await tool.run(_context(), {"action": "ring"})
+    assert full.data["outcome"] == "closed" and full.data["reason"] == "day"
+    assert "demain" in result_text(full.data)
+    now[0] = _at("2026-11-01", 9)
+    tomorrow = await tool.run(_context(), {"action": "ring"})
+    assert tomorrow.data["outcome"] != "closed" and tomorrow.data["rings_left"] == 3
+
+
+async def test_the_bag_tells_when_the_door_reopens(app: App) -> None:
+    halloween.ensure_table(app.database)
+    now = [_at("2026-10-31", 8)]
+    tool = halloween_capability(app.database, clock=lambda: now[0], rng=random.Random(4))
+    await tool.run(_context(), {"action": "ring"})
+    now[0] = _at("2026-10-31", 9)
+    bag = await tool.run(_context(), {"action": "bag"})
+    assert bag.data["rings_left"] == 3 and bag.data["next_at"] > 0
+    assert "prochaine" in status_text(bag.data)
+    now[0] = _at("2026-10-31", 12)
+    assert (await tool.run(_context(), {"action": "bag"})).data["next_at"] == 0
+
+
+def test_a_table_from_before_the_pause_gets_its_new_column(app: App) -> None:
+    halloween.ensure_table(app.database)
+    app.database.execute("DROP TABLE halloween_bag")
+    app.database.execute(
+        "CREATE TABLE halloween_bag (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
+        "name TEXT NOT NULL DEFAULT '', candies INTEGER NOT NULL DEFAULT 0, "
+        "tricks INTEGER NOT NULL DEFAULT 0, day TEXT NOT NULL DEFAULT '', "
+        "rings INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, user_id))"
+    )
+    halloween.ensure_table(app.database)
+    columns = [row["name"] for row in app.database.fetchall("PRAGMA table_info(halloween_bag)")]
+    assert "last_at" in columns
 
 
 async def test_the_bag_adds_up_theft_never_goes_below_zero_and_the_ranking_orders(app: App) -> None:
-    app.database.execute(halloween._TABLE)
+    halloween.ensure_table(app.database)
     tool = halloween_capability(app.database, clock=lambda: _at("2026-10-25"))
     always_trick = random.Random()
     always_trick.random = lambda: 0.0  # type: ignore[method-assign]

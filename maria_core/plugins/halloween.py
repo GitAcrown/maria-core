@@ -9,7 +9,7 @@ import asyncio
 import random
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -23,7 +23,8 @@ from maria_core.ui.widgets import Rendered, card, footer, heading, separator, te
 NAME = "halloween"
 FIRST_DAY = date(2026, 10, 15)
 LAST_DAY = date(2026, 11, 1)
-RINGS_PER_DAY = 3
+RINGS_PER_DAY = 4
+RING_GAP = timedelta(hours=3)
 _PARIS = ZoneInfo("Europe/Paris")
 _TRICK_CHANCE = 0.35
 _RANKING_SIZE = 10
@@ -54,8 +55,12 @@ _TRICKS = (
 type Clock = Callable[[], datetime]
 
 
+def _now(clock: Clock | None) -> datetime:
+    return (clock() if clock is not None else datetime.now(_PARIS)).astimezone(_PARIS)
+
+
 def _today(clock: Clock | None) -> date:
-    return (clock() if clock is not None else datetime.now(_PARIS)).astimezone(_PARIS).date()
+    return _now(clock).date()
 
 
 def in_season(clock: Clock | None = None) -> bool:
@@ -66,7 +71,7 @@ def setup(app: PluginHost) -> None:
     for tag, plain in _FALLBACKS.items():
         FALLBACKS[tag] = plain  # repli Unicode si le bot ne voit pas l'emoji
         note_undo(lambda tag=tag: FALLBACKS.pop(tag, None))
-    app.database.execute(_TABLE)
+    ensure_table(app.database)
     app.capabilities.register(halloween_capability(app.database))
     app.widgets.register("trick_or_treat", render_halloween)
 
@@ -80,9 +85,18 @@ CREATE TABLE IF NOT EXISTS halloween_bag (
     tricks   INTEGER NOT NULL DEFAULT 0,
     day      TEXT NOT NULL DEFAULT '',
     rings    INTEGER NOT NULL DEFAULT 0,
+    last_at  TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (guild_id, user_id)
 )
 """
+
+
+def ensure_table(database: Database) -> None:
+    """Crée la table, et y ajoute `last_at` si elle date d'avant la pause de 3 h."""
+    database.execute(_TABLE)
+    columns = {str(row["name"]) for row in database.fetchall("PRAGMA table_info(halloween_bag)")}
+    if "last_at" not in columns:
+        database.execute("ALTER TABLE halloween_bag ADD COLUMN last_at TEXT NOT NULL DEFAULT ''")
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,12 +117,12 @@ async def play(
     rng: random.Random | None = None,
 ) -> dict[str, Any]:
     """`ring`, `bag` ou `ranking` : utilisé par l'outil du modèle et par le menu /halloween."""
-    today = _today(clock).isoformat()
+    now = _now(clock)
     if action == "ranking":
         return await asyncio.to_thread(_ranking, database, who)
     if action == "bag":
-        return await asyncio.to_thread(_bag, database, who, today)
-    return await asyncio.to_thread(_ring, database, who, today, rng or random.SystemRandom())
+        return await asyncio.to_thread(_bag, database, who, now)
+    return await asyncio.to_thread(_ring, database, who, now, rng or random.SystemRandom())
 
 
 def halloween_capability(
@@ -128,9 +142,10 @@ def halloween_capability(
             "Halloween, bonbons ou sort. action=ring quand quelqu'un sonne à ta porte : « bonbons "
             "ou un sort », « trick or treat », « toc toc », « ding dong », « on frappe à ta "
             "porte », ou il veut des bonbons (le tirage est fait par l'outil, jamais par "
-            "toi ; 3 sonneries par jour et par personne) ; action=bag pour voir son sac de "
-            "bonbons ; action=ranking pour le classement du serveur. Joue le jeu avec une touche "
-            "macabre, brièvement : la carte affiche déjà le résultat."
+            "toi ; une sonnerie toutes les 3 h et 4 par jour au plus, par personne) ; "
+            "action=bag pour voir son sac de bonbons ; action=ranking pour le classement du "
+            "serveur. Joue le jeu avec une touche macabre, brièvement : la carte affiche déjà "
+            "le résultat."
         ),
         parameters={
             "type": "object",
@@ -143,7 +158,8 @@ def halloween_capability(
     )
 
 
-def _ring(database: Database, who: Player, today: str, dice: random.Random) -> dict[str, Any]:
+def _ring(database: Database, who: Player, now: datetime, dice: random.Random) -> dict[str, Any]:
+    today = now.date().isoformat()
     with database.transaction():
         _open_bag(database, who)
         row = database.fetchone(_BAG, (who.guild, who.user))
@@ -151,14 +167,17 @@ def _ring(database: Database, who: Player, today: str, dice: random.Random) -> d
         candies = int(row["candies"]) if row is not None else 0
         tricks = int(row["tricks"]) if row is not None else 0
         if rings >= RINGS_PER_DAY:
-            return _closed(candies, tricks)
+            return _closed(candies, tricks, "day", 0, 0)
+        waiting = _next_ring(row["last_at"] if row is not None else "", now)
+        if waiting:
+            return _closed(candies, tricks, "wait", waiting, RINGS_PER_DAY - rings)
         gained, stolen, outcome, gift = _draw(dice, candies)
         candies += gained - stolen
         tricks += outcome == "trick"
         database.execute(
-            "UPDATE halloween_bag SET name = ?, candies = ?, tricks = ?, day = ?, rings = ? "
-            "WHERE guild_id = ? AND user_id = ?",
-            (who.name, candies, tricks, today, rings + 1, who.guild, who.user),
+            "UPDATE halloween_bag SET name = ?, candies = ?, tricks = ?, day = ?, rings = ?, "
+            "last_at = ? WHERE guild_id = ? AND user_id = ?",
+            (who.name, candies, tricks, today, rings + 1, now.isoformat(), who.guild, who.user),
         )
     return {
         "action": "ring",
@@ -168,6 +187,7 @@ def _ring(database: Database, who: Player, today: str, dice: random.Random) -> d
         "stolen": stolen,
         "candies": candies,
         "rings_left": RINGS_PER_DAY - rings - 1,
+        "next_at": int((now + RING_GAP).timestamp()) if rings + 1 < RINGS_PER_DAY else 0,
     }
 
 
@@ -181,13 +201,25 @@ def _draw(dice: random.Random, candies: int) -> tuple[int, int, str, str]:
     return worth, 0, "treat", gift
 
 
-def _closed(candies: int, tricks: int) -> dict[str, Any]:
+def _next_ring(last_at: object, now: datetime) -> int:
+    """Quand la porte rouvre (timestamp), ou 0 si la pause de 3 h est passée."""
+    try:
+        last = datetime.fromisoformat(str(last_at))
+    except ValueError:
+        return 0
+    reopen = last + RING_GAP
+    return int(reopen.timestamp()) if reopen > now else 0
+
+
+def _closed(candies: int, tricks: int, reason: str, next_at: int, left: int) -> dict[str, Any]:
     return {
         "action": "ring",
         "outcome": "closed",
+        "reason": reason,
         "candies": candies,
         "tricks": tricks,
-        "rings_left": 0,
+        "rings_left": left,
+        "next_at": next_at,
     }
 
 
@@ -202,16 +234,18 @@ def _open_bag(database: Database, who: Player) -> None:
 _BAG = "SELECT * FROM halloween_bag WHERE guild_id = ? AND user_id = ?"
 
 
-def _bag(database: Database, who: Player, today: str) -> dict[str, Any]:
+def _bag(database: Database, who: Player, now: datetime) -> dict[str, Any]:
     row = database.fetchone(_BAG, (who.guild, who.user))
     if row is None:
         return {"action": "bag", "candies": 0, "tricks": 0, "rings_left": RINGS_PER_DAY}
-    used = int(row["rings"]) if row["day"] == today else 0
+    used = int(row["rings"]) if row["day"] == now.date().isoformat() else 0
+    left = max(0, RINGS_PER_DAY - used)
     return {
         "action": "bag",
         "candies": int(row["candies"]),
         "tricks": int(row["tricks"]),
-        "rings_left": max(0, RINGS_PER_DAY - used),
+        "rings_left": left,
+        "next_at": _next_ring(row["last_at"], now) if left else 0,
     }
 
 
@@ -253,6 +287,8 @@ def result_text(data: Mapping[str, Any]) -> str:
         )
     outcome = data.get("outcome")
     if outcome == "closed":
+        if data.get("reason") == "wait" and data.get("next_at"):
+            return f"La porte reste fermée… Reviens <t:{data['next_at']}:R>."
         return "La porte reste fermée… Reviens demain pour de nouvelles sonneries."
     if outcome == "trick":
         lost = int(data.get("stolen") or 0)
@@ -266,6 +302,8 @@ def status_text(data: Mapping[str, Any]) -> str:
     if data.get("action") == "ranking":
         return "Classement du serveur"
     left = _rings_text(int(data.get("rings_left") or 0))
+    if data.get("next_at") and data.get("rings_left") != 0:
+        left += f"  ·  prochaine <t:{data['next_at']}:R>"
     if data.get("action") == "bag":
         return left
     return f"Sac · {data.get('candies', 0)} {CANDY}  ·  {left}"
