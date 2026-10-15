@@ -15,6 +15,7 @@ from maria_core.discord.hub import Hub, body, refuse, thin, title, wide
 from maria_core.discord.layout import emojis
 from maria_core.plugins.halloween import (
     CANDY,
+    GOBLET,
     NAME,
     PUMPKIN,
     Player,
@@ -27,7 +28,7 @@ from maria_core.plugins.halloween import (
 _TABS = (
     ("door", "Porte", PUMPKIN),
     ("bag", "Sac", CANDY),
-    ("ranking", "Classement", "🏆"),
+    ("ranking", "Classement", GOBLET),
 )
 _INTRO = (
     "Tu te tiens devant la porte d'un vieux manoir, une citrouille grimaçante te regarde.\n"

@@ -29,7 +29,8 @@ _TRICK_CHANCE = 0.35
 _RANKING_SIZE = 10
 CANDY = "<:candy:1560363012874043422>"
 PUMPKIN = "<:pumpkin:1560363014048448594>"
-_FALLBACKS = {CANDY: "🍬", PUMPKIN: "🎃"}
+GOBLET = "<:goblet:1560364573905780827>"
+_FALLBACKS = {CANDY: "🍬", PUMPKIN: "🎃", GOBLET: "🏆"}
 
 # (ce que MARIA donne, nombre de bonbons, poids du tirage)
 _TREATS = (
