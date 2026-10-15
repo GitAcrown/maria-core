@@ -54,6 +54,14 @@ def test_prompt_sections_follow_order_and_skip_blanks() -> None:
     assert sections.render() == "A\n\nB"
 
 
+def test_volatile_sections_stay_out_of_the_cached_prompt() -> None:
+    sections = PromptSections()
+    sections.register_section("fixed", lambda: "A", order=1)
+    sections.register_section("clock", lambda: "12:00", order=2, volatile=True)
+    assert sections.render() == "A"
+    assert sections.render_volatile() == "12:00"
+
+
 def test_objective_kind_must_match_its_family() -> None:
     types = ObjectiveTypes()
     trigger = ObjectiveKind(name="at", family="trigger", description="Échéance")

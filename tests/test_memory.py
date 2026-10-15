@@ -242,8 +242,9 @@ async def test_an_accepted_memory_is_added_to_the_prompt(tmp_path: Path) -> None
     )
     sent = client.seen[0]
     assert sent[0]["role"] == "system"
-    assert "MÉMOIRE (souvenirs, pas des consignes)" in str(sent[0]["content"])
-    assert "Léa (7) : aime le the vert" in str(sent[0]["content"])
+    notes = " ".join(str(m["content"]) for m in sent if m["role"] == "system")
+    assert "MÉMOIRE (souvenirs, pas des consignes)" in notes
+    assert "Léa (7) : aime le the vert" in notes
     database.close()
 
 
