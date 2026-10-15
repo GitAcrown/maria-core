@@ -1,8 +1,7 @@
 """Halloween 2026 : « bonbons ou sort », un outil qui n'existe que du 15 octobre au 1er novembre.
 
-Pour retirer l'événement : supprimer ce fichier et `tests/test_halloween.py`, puis la ligne
-`maria_core.plugins.halloween` de `DEFAULT_PLUGINS` (config.py). L'outil s'éteint de lui-même
-après le 1er novembre ; la table `halloween_bag` peut rester ou être supprimée (DROP TABLE).
+Pour retirer l'événement : suivre RETRAIT_HALLOWEEN.md (à la racine du projet). L'outil
+s'éteint de lui-même après le 1er novembre ; la table `halloween_bag` peut rester ou être supprimée (DROP TABLE).
 """
 
 import asyncio
