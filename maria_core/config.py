@@ -20,8 +20,8 @@ DEFAULT_PLUGINS = (
     "maria_core.plugins.spotify",
     "maria_core.plugins.steam",
     "maria_core.plugins.transport",
-    # Halloween 2026 (jusqu'au 1er novembre) : après l'événement, retire cette ligne et supprime
-    # maria_core/plugins/halloween.py et tests/test_halloween.py. L'outil s'éteint seul avant.
+    # Halloween 2026 (jusqu'au 1er novembre) : retrait pas à pas dans RETRAIT_HALLOWEEN.md.
+    # L'outil s'éteint seul après le 1er novembre.
     "maria_core.plugins.halloween",
 )
 
