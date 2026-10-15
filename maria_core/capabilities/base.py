@@ -76,6 +76,7 @@ class Capability:
     timeout_s: float = 20.0
     cache_s: float = 0.0
     profile_args: tuple[tuple[str, str, bool], ...] = ()
+    active: Callable[[], bool] | None = None
 
     def __post_init__(self) -> None:
         require_name(self.name, what="Capacité")

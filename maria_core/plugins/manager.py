@@ -15,6 +15,7 @@ from maria_core.capabilities import CapabilityRegistry
 from maria_core.capabilities.http import HttpClient
 from maria_core.commands import CommandCatalog
 from maria_core.config import Settings
+from maria_core.db import Database
 from maria_core.decisions import DecisionRegistry
 from maria_core.errors import PluginError, RegistryError
 from maria_core.events import EventBus
@@ -31,6 +32,7 @@ class PluginHost(Protocol):
     """Attributs qu'une extension est autorisée à utiliser. `App` les fournit."""
 
     settings: Settings
+    database: Database
     http: HttpClient
     capabilities: CapabilityRegistry
     widgets: WidgetRegistry

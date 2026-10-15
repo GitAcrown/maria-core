@@ -70,7 +70,7 @@ def available(registry: CapabilityRegistry, settings: Settings) -> tuple[Capabil
     ready = []
     for name in registry.names():
         capability = registry.get(name)
-        if not _missing_keys(settings, capability):
+        if _in_season(capability) and not _missing_keys(settings, capability):
             ready.append(capability)
     return tuple(ready)
 
@@ -85,11 +85,7 @@ async def _invoke(
     if call.name not in registry:
         return Result(ok=False, data={}, error=f"Outil inconnu : {call.name}")
     capability = registry.get(call.name)
-    missing = _missing_keys(settings, capability)
-    if missing:
-        listed = ", ".join(missing)
-        return Result(ok=False, data={}, error=f"Capacité indisponible, clé manquante : {listed}")
-    denied = _denied(capability, context)
+    denied = _unavailable(settings, capability) or _denied(capability, context)
     if denied:
         return Result(ok=False, data={}, error=denied)
     raw = dict(call.arguments)
@@ -115,6 +111,20 @@ async def _invoke(
     except Exception as exc:
         logger.exception("Capacité %s en échec", call.name)
         return Result(ok=False, data={}, error=str(exc))
+
+
+def _unavailable(settings: Settings, capability: Capability) -> str:
+    if not _in_season(capability):
+        return "Cet outil n'est pas disponible en ce moment."
+    missing = _missing_keys(settings, capability)
+    if missing:
+        return f"Capacité indisponible, clé manquante : {', '.join(missing)}"
+    return ""
+
+
+def _in_season(capability: Capability) -> bool:
+    """Un outil saisonnier (`active`) disparaît de la liste hors période, sans redémarrage."""
+    return capability.active is None or capability.active()
 
 
 def _fill(
