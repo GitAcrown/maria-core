@@ -125,8 +125,9 @@ def halloween_capability(
     return Capability(
         name="trick_or_treat",
         description=(
-            "Halloween, bonbons ou sort. action=ring quand quelqu'un sonne à ta porte, dit "
-            "« bonbons ou sort » ou veut des bonbons (le tirage est fait par l'outil, jamais par "
+            "Halloween, bonbons ou sort. action=ring quand quelqu'un sonne à ta porte : « bonbons "
+            "ou un sort », « trick or treat », « toc toc », « ding dong », « on frappe à ta "
+            "porte », ou il veut des bonbons (le tirage est fait par l'outil, jamais par "
             "toi ; 3 sonneries par jour et par personne) ; action=bag pour voir son sac de "
             "bonbons ; action=ranking pour le classement du serveur. Joue le jeu avec une touche "
             "macabre, brièvement : la carte affiche déjà le résultat."
@@ -232,7 +233,7 @@ def _ranking(database: Database, who: Player) -> dict[str, Any]:
 
 
 def render_halloween(data: Mapping[str, Any]) -> Rendered:
-    title = heading("Bonbons ou sort", "Halloween", emoji=PUMPKIN)
+    title = heading("Bonbons ou sort", emoji=PUMPKIN)
     built = card(title, separator(wide=True), text(result_text(data)), footer(status_text(data)))
     if data.get("action") == "ranking":
         return Rendered(cards=(built,))

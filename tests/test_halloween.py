@@ -100,6 +100,7 @@ def test_the_cards_say_what_happened(app: App) -> None:
         {"action": "ring", "outcome": "treat", "gift": "un bonbon", "gained": 1, "candies": 6}
     )
     assert "Des bonbons" in treat.cards[0].as_text() and "6" in treat.cards[0].as_text()
+    assert "Halloween" not in treat.cards[0].as_text()  # plus de ligne d'événement dans la carte
     trick = render_halloween(
         {"action": "ring", "outcome": "trick", "gift": "Une sorcière…", "stolen": 2, "candies": 1}
     )
