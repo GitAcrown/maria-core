@@ -27,9 +27,9 @@ RINGS_PER_DAY = 3
 _PARIS = ZoneInfo("Europe/Paris")
 _TRICK_CHANCE = 0.35
 _RANKING_SIZE = 10
-_CANDY = "<:candy:1560363012874043422>"
-_PUMPKIN = "<:pumpkin:1560363014048448594>"
-_FALLBACKS = {_CANDY: "🍬", _PUMPKIN: "🎃"}
+CANDY = "<:candy:1560363012874043422>"
+PUMPKIN = "<:pumpkin:1560363014048448594>"
+_FALLBACKS = {CANDY: "🍬", PUMPKIN: "🎃"}
 
 # (ce que MARIA donne, nombre de bonbons, poids du tirage)
 _TREATS = (
@@ -85,10 +85,29 @@ CREATE TABLE IF NOT EXISTS halloween_bag (
 
 
 @dataclass(frozen=True, slots=True)
-class _Who:
+class Player:
+    """Un sac par serveur et par personne (`guild` vaut 0 en message privé)."""
+
     guild: int
     user: int
     name: str
+
+
+async def play(
+    database: Database,
+    who: Player,
+    action: str,
+    *,
+    clock: Clock | None = None,
+    rng: random.Random | None = None,
+) -> dict[str, Any]:
+    """`ring`, `bag` ou `ranking` : utilisé par l'outil du modèle et par le menu /halloween."""
+    today = _today(clock).isoformat()
+    if action == "ranking":
+        return await asyncio.to_thread(_ranking, database, who)
+    if action == "bag":
+        return await asyncio.to_thread(_bag, database, who, today)
+    return await asyncio.to_thread(_ring, database, who, today, rng or random.SystemRandom())
 
 
 def halloween_capability(
@@ -97,18 +116,9 @@ def halloween_capability(
     clock: Clock | None = None,
     rng: random.Random | None = None,
 ) -> Capability:
-    dice = rng or random.SystemRandom()
-
     async def run(context: Context, args: Mapping[str, Any]) -> Result:
-        who = _Who(context.guild_id or 0, context.user_id, context.author_name)
-        today = _today(clock).isoformat()
-        action = str(args.get("action") or "ring")
-        if action == "ranking":
-            data = await asyncio.to_thread(_ranking, database, who)
-        elif action == "bag":
-            data = await asyncio.to_thread(_bag, database, who, today)
-        else:
-            data = await asyncio.to_thread(_ring, database, who, today, dice)
+        who = Player(context.guild_id or 0, context.user_id, context.author_name)
+        data = await play(database, who, str(args.get("action") or "ring"), clock=clock, rng=rng)
         return Result(ok=True, data=data, widget="trick_or_treat")
 
     return Capability(
@@ -131,7 +141,7 @@ def halloween_capability(
     )
 
 
-def _ring(database: Database, who: _Who, today: str, dice: random.Random) -> dict[str, Any]:
+def _ring(database: Database, who: Player, today: str, dice: random.Random) -> dict[str, Any]:
     with database.transaction():
         _open_bag(database, who)
         row = database.fetchone(_BAG, (who.guild, who.user))
@@ -179,7 +189,7 @@ def _closed(candies: int, tricks: int) -> dict[str, Any]:
     }
 
 
-def _open_bag(database: Database, who: _Who) -> None:
+def _open_bag(database: Database, who: Player) -> None:
     database.execute(
         "INSERT INTO halloween_bag (guild_id, user_id, name) VALUES (?, ?, ?) "
         "ON CONFLICT (guild_id, user_id) DO NOTHING",
@@ -190,7 +200,7 @@ def _open_bag(database: Database, who: _Who) -> None:
 _BAG = "SELECT * FROM halloween_bag WHERE guild_id = ? AND user_id = ?"
 
 
-def _bag(database: Database, who: _Who, today: str) -> dict[str, Any]:
+def _bag(database: Database, who: Player, today: str) -> dict[str, Any]:
     row = database.fetchone(_BAG, (who.guild, who.user))
     if row is None:
         return {"action": "bag", "candies": 0, "tricks": 0, "rings_left": RINGS_PER_DAY}
@@ -203,7 +213,7 @@ def _bag(database: Database, who: _Who, today: str) -> dict[str, Any]:
     }
 
 
-def _ranking(database: Database, who: _Who) -> dict[str, Any]:
+def _ranking(database: Database, who: Player) -> dict[str, Any]:
     rows = database.fetchall(
         "SELECT user_id, name, candies FROM halloween_bag WHERE guild_id = ? AND "
         "(candies > 0 OR tricks > 0) ORDER BY candies DESC, tricks DESC, name LIMIT ?",
@@ -221,28 +231,42 @@ def _ranking(database: Database, who: _Who) -> dict[str, Any]:
 
 
 def render_halloween(data: Mapping[str, Any]) -> Rendered:
-    action = str(data.get("action") or "")
-    title = heading("Bonbons ou sort", "Halloween", emoji=_PUMPKIN)
+    title = heading("Bonbons ou sort", "Halloween", emoji=PUMPKIN)
+    built = card(title, separator(wide=True), text(result_text(data)), footer(status_text(data)))
+    if data.get("action") == "ranking":
+        return Rendered(cards=(built,))
+    note = f"trick_or_treat : {data.get('outcome', '')}, {data.get('candies', 0)} bonbons au total"
+    return Rendered(cards=(built,), note=note if data.get("action") == "ring" else "")
+
+
+def result_text(data: Mapping[str, Any]) -> str:
+    """Ce qui s'est passé : sonnerie, contenu du sac ou classement."""
+    action = data.get("action")
     if action == "ranking":
-        return _show_ranking(title, data)
-    sack = f"Sac · {data.get('candies', 0)} {_CANDY}"
+        return _board_text(data.get("board") or [])
     if action == "bag":
-        left = _rings_text(int(data.get("rings_left") or 0))
-        body = f"**{data.get('candies', 0)}** {_CANDY} dans ton sac"
-        body += f" · {data.get('tricks', 0)} sort(s) subi(s)"
-        return Rendered(cards=(card(title, separator(wide=True), text(body), footer(left)),))
+        return (
+            f"**{data.get('candies', 0)}** {CANDY} dans ton sac"
+            f" · {data.get('tricks', 0)} sort(s) subi(s)"
+        )
     outcome = data.get("outcome")
     if outcome == "closed":
-        body = "La porte reste fermée… Reviens demain pour de nouvelles sonneries."
-    elif outcome == "trick":
+        return "La porte reste fermée… Reviens demain pour de nouvelles sonneries."
+    if outcome == "trick":
         lost = int(data.get("stolen") or 0)
-        extra = f" (-{lost} {_CANDY})" if lost else ""
-        body = f"**Un sort !** {data.get('gift')}{extra}"
-    else:
-        body = f"**Des bonbons !** Tu reçois {data.get('gift')} (+{data.get('gained')} {_CANDY})"
-    foot = f"{sack}  ·  {_rings_text(int(data.get('rings_left') or 0))}"
-    note = f"trick_or_treat : {outcome}, {data.get('candies', 0)} bonbons au total"
-    return Rendered(cards=(card(title, separator(wide=True), text(body), footer(foot)),), note=note)
+        extra = f" (-{lost} {CANDY})" if lost else ""
+        return f"**Un sort !** {data.get('gift')}{extra}"
+    return f"**Des bonbons !** Tu reçois {data.get('gift')} (+{data.get('gained')} {CANDY})"
+
+
+def status_text(data: Mapping[str, Any]) -> str:
+    """Pied de carte : le sac et les sonneries qui restent."""
+    if data.get("action") == "ranking":
+        return "Classement du serveur"
+    left = _rings_text(int(data.get("rings_left") or 0))
+    if data.get("action") == "bag":
+        return left
+    return f"Sac · {data.get('candies', 0)} {CANDY}  ·  {left}"
 
 
 def _rings_text(left: int) -> str:
@@ -251,18 +275,13 @@ def _rings_text(left: int) -> str:
     return f"{left} sonnerie{'s' if left > 1 else ''} restante{'s' if left > 1 else ''} aujourd'hui"
 
 
-def _show_ranking(title: Any, data: Mapping[str, Any]) -> Rendered:
-    board = data.get("board") or []
+def _board_text(board: list[Mapping[str, Any]]) -> str:
     if not board:
-        body = "Personne n'a encore sonné ici. Qui ose frapper à la porte ?"
-    else:
-        medals = ("🥇", "🥈", "🥉")
-        lines = []
-        for rank, entry in enumerate(board):
-            mark = medals[rank] if rank < len(medals) else f"{rank + 1}."
-            name = f"**{entry['name']}**" if entry.get("me") else str(entry["name"])
-            lines.append(f"{mark} {name} · {entry['candies']} {_CANDY}")
-        body = "\n".join(lines)
-    return Rendered(
-        cards=(card(title, separator(wide=True), text(body), footer("Classement du serveur")),)
-    )
+        return "Personne n'a encore sonné ici. Qui ose frapper à la porte ?"
+    medals = ("🥇", "🥈", "🥉")
+    lines = []
+    for rank, entry in enumerate(board):
+        mark = medals[rank] if rank < len(medals) else f"{rank + 1}."
+        name = f"**{entry['name']}**" if entry.get("me") else str(entry["name"])
+        lines.append(f"{mark} {name} · {entry['candies']} {CANDY}")
+    return "\n".join(lines)
