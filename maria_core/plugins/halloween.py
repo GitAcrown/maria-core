@@ -15,7 +15,9 @@ from zoneinfo import ZoneInfo
 
 from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.db import Database
+from maria_core.ledger import note_undo
 from maria_core.plugins import PluginHost
+from maria_core.ui.emojis import FALLBACKS
 from maria_core.ui.widgets import Rendered, card, footer, heading, separator, text
 
 NAME = "halloween"
@@ -25,8 +27,9 @@ RINGS_PER_DAY = 3
 _PARIS = ZoneInfo("Europe/Paris")
 _TRICK_CHANCE = 0.35
 _RANKING_SIZE = 10
-_CANDY = "🍬"
-_PUMPKIN = "🎃"
+_CANDY = "<:candy:1560363012874043422>"
+_PUMPKIN = "<:pumpkin:1560363014048448594>"
+_FALLBACKS = {_CANDY: "🍬", _PUMPKIN: "🎃"}
 
 # (ce que MARIA donne, nombre de bonbons, poids du tirage)
 _TREATS = (
@@ -59,6 +62,9 @@ def in_season(clock: Clock | None = None) -> bool:
 
 
 def setup(app: PluginHost) -> None:
+    for tag, plain in _FALLBACKS.items():
+        FALLBACKS[tag] = plain  # repli Unicode si le bot ne voit pas l'emoji
+        note_undo(lambda tag=tag: FALLBACKS.pop(tag, None))
     app.database.execute(_TABLE)
     app.capabilities.register(halloween_capability(app.database))
     app.widgets.register("trick_or_treat", render_halloween)
