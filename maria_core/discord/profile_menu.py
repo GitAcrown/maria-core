@@ -1,26 +1,14 @@
-"""/profil : ce que MARIA sait de toi et comment elle te parle. Tout se voit et se change ici."""
+"""Onglet Profil de /moi : ce que MARIA sait de toi et comment elle te parle."""
 
 import asyncio
 
 import discord
 
 from maria_core.app import App
-from maria_core.discord.hub import (
-    Action,
-    Hub,
-    Picker,
-    Run,
-    Tab,
-    body,
-    option,
-    tab_bar,
-    thin,
-    title,
-    wide,
-)
+from maria_core.discord.hub import Action, Hub, Picker, body, option, thin, title, wide
 from maria_core.profile.service import Resolved
 from maria_core.profile.slots import BY_KEY, FACTS, STYLE, Slot
-from maria_core.ui.emojis import SLOT_ICONS, SMALL_BRAIN
+from maria_core.ui.emojis import SLOT_ICONS
 
 _PROVENANCE = {
     "user": "réglé par toi",
@@ -33,13 +21,12 @@ _RED = discord.ButtonStyle.danger
 
 
 class ProfileHub(Hub):
-    def __init__(self, app: App, user_id: int, name: str) -> None:
-        super().__init__(viewer_id=user_id)
+    def __init__(self, app: App, user_id: int, name: str, host: Hub | None = None) -> None:
+        super().__init__(viewer_id=user_id, host=host)
         self.app = app
         self.user_id = user_id
         self.name = name
         self.screen = "catalog"
-        self.tab = "facts"
         self.selected = ""
         self.note = ""
         self.found: dict[str, Resolved] = {}
@@ -55,44 +42,29 @@ class ProfileHub(Hub):
             self._catalog()
 
     def _catalog(self) -> None:
-        facts = self.tab == "facts"
-        slots = FACTS if facts else STYLE
-        text = "\n".join(self._line(slot) for slot in slots)
-        if not facts:
-            text += (
-                "\n-# Le style se déduit de la longueur et du ton de tes messages, "
-                "jamais de leur contenu."
-            )
         content: list[discord.ui.Item] = [
             title(f"Profil · {self.name}", "MARIA s'en sert toute seule, tu peux tout changer"),
             wide(),
-            body(text),
+            body("### Ce qu'elle sait\n" + "\n".join(self._line(slot) for slot in FACTS)),
+            thin(),
+            body(
+                "### Comment elle te parle\n"
+                + "\n".join(self._line(slot) for slot in STYLE)
+                + "\n-# Le style se déduit de la longueur et du ton de tes messages, "
+                "jamais de leur contenu."
+            ),
         ]
         if self.note:
-            content.append(body(f"-# {self.note}"))
+            content += [thin(), body(f"-# {self.note}")]
         options = [
             option(slot.key, slot.label, self._plain(slot), SLOT_ICONS.get(slot.key, ""))
-            for slot in slots
+            for slot in (*FACTS, *STYLE)
         ]
-        rows = [discord.ui.ActionRow(Picker("Modifier un champ…", options, self._open))]
-        if not facts:
-            reset = Action("Réinitialiser le style", self._reset, style=_RED)
-            rows.append(discord.ui.ActionRow(reset))
-        self.set_layout(content, *rows, above=tab_bar(self._tabs()))
-
-    def _tabs(self) -> list[Tab]:
-        facts, style = self.tab == "facts", self.tab == "style"
-        return [
-            Tab("Ce qu'elle sait", self._show("facts"), active=facts, emoji=SMALL_BRAIN),
-            Tab("Comment elle te parle", self._show("style"), active=style, emoji="💬"),
+        rows = [
+            discord.ui.ActionRow(Picker("Modifier un champ…", options, self._open)),
+            discord.ui.ActionRow(Action("Réinitialiser le style", self._reset, style=_RED)),
         ]
-
-    def _show(self, tab: str) -> Run:
-        async def run(interaction: discord.Interaction) -> None:
-            self.tab, self.note = tab, ""
-            await self.refresh(interaction)
-
-        return run
+        self.set_layout(content, *rows)
 
     def _slot(self, slot: Slot) -> None:
         current = self.found.get(slot.key)
@@ -198,9 +170,3 @@ class _SetValue(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         await self.hub.save(interaction, self.slot, str(self.value.value))
-
-
-async def open_profile(interaction: discord.Interaction, app: App) -> None:
-    hub = ProfileHub(app, interaction.user.id, interaction.user.display_name)
-    await hub.load()
-    await hub.open(interaction)

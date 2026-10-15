@@ -18,7 +18,7 @@ def test_the_default_voice_matches_the_old_one() -> None:
     assert "objective_create" in text
     assert "n'invente" in text.lower() or "N'invente" in text
     names = sorted(command.name for command in PublicCommands.__cog_app_commands__)
-    assert names == ["chatbot", "global", "info", "moi", "preferences", "profil", "programmes"]
+    assert names == ["chatbot", "global", "info", "moi", "preferences", "programmes"]
     group = next(
         command for command in PublicCommands.__cog_app_commands__ if command.name == "chatbot"
     )

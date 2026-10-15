@@ -12,7 +12,7 @@ _TEXT = (
     "Règle un champ du profil de la personne, quand elle le demande ou le dit sans ambiguïté : "
     "« j'habite à Lyon » (city), « mon équipe c'est l'OM » (team), « mon métro c'est République » "
     "(stop), « réponds-moi plus court » (length), « tutoie-moi, détends-toi » (tone), "
-    "« mets des emojis » (emoji). value vide : efface le champ. Elle le voit dans /profil."
+    "« mets des emojis » (emoji). value vide : efface le champ. Elle le voit dans /moi."
 )
 
 

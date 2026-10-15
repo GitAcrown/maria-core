@@ -53,8 +53,8 @@ class MemoryState:
 
 
 class MemoryHub(Hub):
-    def __init__(self, app: App, state: MemoryState, actor: Actor) -> None:
-        super().__init__(viewer_id=state.user_id)
+    def __init__(self, app: App, state: MemoryState, actor: Actor, host: Hub | None = None) -> None:
+        super().__init__(viewer_id=state.user_id, host=host)
         self.app = app
         self.state = state
         self.actor = actor
@@ -220,13 +220,17 @@ class MemoryHub(Hub):
             return self.state.proposals
         return self.state.recent if self.tab == "recent" else self.state.memories
 
-    def _tabs(self) -> list[Tab]:
-        tabs = [self._tab("memories", "Souvenirs", SMALL_BRAIN)]
+    def tab_specs(self) -> list[tuple[str, str, str]]:
+        """Les onglets de mémoire : clé, libellé, emoji. Seuls ceux qui ont du contenu."""
+        specs = [("memories", "Souvenirs", SMALL_BRAIN)]
         if self.state.recent:
-            tabs.append(self._tab("recent", f"Appris récemment ({len(self.state.recent)})", "✨"))
+            specs.append(("recent", f"Appris récemment ({len(self.state.recent)})", "✨"))
         if self.state.proposals:
-            tabs.append(self._tab("proposals", f"À valider ({len(self.state.proposals)})", "📥"))
-        return tabs
+            specs.append(("proposals", f"À valider ({len(self.state.proposals)})", "📥"))
+        return specs
+
+    def _tabs(self) -> list[Tab]:
+        return [self._tab(key, label, emoji) for key, label, emoji in self.tab_specs()]
 
     def _age(self, item: Memory | Proposal) -> str:
         if self.tab != "recent" or not isinstance(item, Memory):
@@ -385,7 +389,9 @@ def _ago(delta: timedelta) -> str:
     return f"il y a {minutes // 1440} j"
 
 
-async def open_memory(interaction: discord.Interaction, app: App, *, collective: bool) -> None:
+async def memory_state(
+    interaction: discord.Interaction, *, collective: bool
+) -> tuple[MemoryState, Actor]:
     user = interaction.user
     permissions = getattr(user, "guild_permissions", None)
     actor = Actor(
@@ -402,6 +408,11 @@ async def open_memory(interaction: discord.Interaction, app: App, *, collective:
         can_manage=actor.is_owner or actor.is_moderator,
         name=name,
     )
+    return state, actor
+
+
+async def open_memory(interaction: discord.Interaction, app: App, *, collective: bool) -> None:
+    state, actor = await memory_state(interaction, collective=collective)
     hub = MemoryHub(app, state, actor)
     await interaction.response.defer(ephemeral=True, thinking=True)
     await hub.load()

@@ -1,4 +1,4 @@
-"""Les champs du profil. Chacun est visible et modifiable dans /profil."""
+"""Les champs du profil. Chacun est visible et modifiable dans /moi (onglet Profil)."""
 
 from dataclasses import dataclass
 
