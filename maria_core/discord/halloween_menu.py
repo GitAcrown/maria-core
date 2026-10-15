@@ -19,11 +19,13 @@ from maria_core.plugins.halloween import (
     NAME,
     PUMPKIN,
     Player,
+    Reward,
     in_season,
     play,
     result_text,
     status_text,
 )
+from maria_core.plugins.halloween_sweets import SWEET_FALLBACKS
 
 _TABS = (
     ("bag", "Sac", CANDY),
@@ -71,6 +73,22 @@ class HalloweenCog(commands.Cog):
     def __init__(self, bot: commands.Bot, app: App) -> None:
         self.bot = bot
         self.app = app
+
+    async def cog_load(self) -> None:
+        self.app.events.subscribe(Reward, self._reward)
+
+    async def cog_unload(self) -> None:
+        self.app.events.unsubscribe(Reward, self._reward)
+
+    async def _reward(self, reward: Reward) -> None:
+        """Un gage respecté : une réaction bonbon sur le message de la personne."""
+        react = self.app.social.reactor
+        if react is None:
+            return
+        if not await react(reward.channel_id, reward.message_id, reward.emoji):
+            await react(
+                reward.channel_id, reward.message_id, SWEET_FALLBACKS.get(reward.emoji, "🍬")
+            )
 
     @app_commands.command(
         name="halloween", description="Bonbons ou sort : ton sac et le classement"
