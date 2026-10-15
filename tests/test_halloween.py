@@ -15,6 +15,7 @@ from maria_core.plugins.halloween import (
     in_season,
     render_halloween,
 )
+from maria_core.ui.emojis import FALLBACKS
 
 _PARIS = ZoneInfo("Europe/Paris")
 
@@ -107,6 +108,13 @@ def test_the_cards_say_what_happened(app: App) -> None:
     assert "Reviens demain" in shut.cards[0].as_text()
     empty = render_halloween({"action": "ranking", "board": []})
     assert "Personne" in empty.cards[0].as_text()
+
+
+def test_custom_emojis_have_a_unicode_fallback_only_while_loaded(app: App) -> None:
+    app.plugins.load("maria_core.plugins.halloween")
+    assert FALLBACKS[halloween._PUMPKIN] == "🎃" and FALLBACKS[halloween._CANDY] == "🍬"
+    app.plugins.unload("halloween")
+    assert halloween._PUMPKIN not in FALLBACKS
 
 
 def test_the_event_is_a_plugin_loaded_by_default_and_removable(app: App) -> None:
