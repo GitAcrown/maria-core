@@ -410,7 +410,7 @@ async def test_links_files_and_profile_reach_the_model(tmp_path: Path) -> None:
     message = _message(mentioned=True, text="Maria, lis https://exemple.fr/a", files=(video,))
     reply = await service.handle(message)
     assert reply is not None and reply.chunks == ("Lu.",)
-    system = client.seen[0][0]["content"]
+    system = " ".join(str(m["content"]) for m in client.seen[0] if m["role"] == "system")
     assert "PROFIL DE Léa" in system and "ville : Lyon" in system
     seen = "\n".join(str(item["content"]) for item in client.seen[0])
     assert "Texte du lien." in seen

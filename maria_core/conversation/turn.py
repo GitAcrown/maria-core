@@ -96,8 +96,13 @@ class TurnRunner:
             duration_ms=again.duration_ms + outcome.duration_ms,
         )
 
-    def system(self, data: TurnInput) -> str:
-        parts = [self._prompt.render()]
+    def system(self) -> str:
+        """Identique d'un message à l'autre : l'API en garde le début en cache."""
+        return self._prompt.render()
+
+    def volatile(self, data: TurnInput) -> str:
+        """Heure, repères, mémoire : ce qui change à chaque tour, donné après l'historique."""
+        parts = [self._prompt.render_volatile()]
         parts.append(turn_header(data.message, model=data.model))
         parts.extend(item.strip() for item in data.extras if item and item.strip())
         if data.silence:
@@ -111,6 +116,7 @@ class TurnRunner:
             if item.name not in data.deny
         ]
         messages = list(data.history.api_messages())
+        messages.append({"role": "system", "content": self.volatile(data)})
         messages.append(focus_note(data.message, data.files))
         guard = _SearchGuard()
         context = _context(data.message)
@@ -133,7 +139,7 @@ class TurnRunner:
         return await complete_turn(
             self._client,
             messages,
-            system=self.system(data),
+            system=self.system(),
             tools=tools,
             execute=execute,
             first_choice=choice if tools else "auto",

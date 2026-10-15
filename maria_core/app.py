@@ -82,7 +82,7 @@ class App:
         self.channel_reader: ChannelReader | None = None
         self._discord_bound = False
         self.prompt.register_section("personality", default_personality, order=0)
-        self.prompt.register_section("clock", clock_section(), order=10)
+        self.prompt.register_section("clock", clock_section(), order=10, volatile=True)
         self.conversation = ConversationService(
             database=database,
             client=self.llm,
