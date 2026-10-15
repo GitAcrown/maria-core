@@ -14,6 +14,7 @@ from maria_core.discord.commands.public import PublicCommands
 from maria_core.discord.commands.social import SocialCommands
 from maria_core.discord.commands.usage import UsageCommands
 from maria_core.discord.directory import DiscordDirectory
+from maria_core.discord.halloween_menu import HalloweenCog
 from maria_core.discord.layout import use_emojis
 from maria_core.discord.learned_view import restore_learned
 from maria_core.discord.memory_view import restore_proposals
@@ -119,6 +120,7 @@ class MariaBot(commands.Bot):
             SocialCommands(self),
             UsageCommands(self, app),
             PublicCommands(self),
+            HalloweenCog(self, app),  # événement Halloween 2026, voir RETRAIT_HALLOWEEN.md
             PresenceCog(self, app.settings.data_dir / "statuses.txt"),
         ):
             await self.add_cog(cog)

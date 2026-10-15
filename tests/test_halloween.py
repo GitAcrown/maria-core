@@ -112,9 +112,9 @@ def test_the_cards_say_what_happened(app: App) -> None:
 
 def test_custom_emojis_have_a_unicode_fallback_only_while_loaded(app: App) -> None:
     app.plugins.load("maria_core.plugins.halloween")
-    assert FALLBACKS[halloween._PUMPKIN] == "🎃" and FALLBACKS[halloween._CANDY] == "🍬"
+    assert FALLBACKS[halloween.PUMPKIN] == "🎃" and FALLBACKS[halloween.CANDY] == "🍬"
     app.plugins.unload("halloween")
-    assert halloween._PUMPKIN not in FALLBACKS
+    assert halloween.PUMPKIN not in FALLBACKS
 
 
 def test_the_event_is_a_plugin_loaded_by_default_and_removable(app: App) -> None:
