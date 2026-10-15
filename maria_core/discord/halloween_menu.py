@@ -1,4 +1,4 @@
-"""/halloween : menu à onglets (porte, sac, classement), comme le /carnet de CRIT.
+"""/halloween : menu à onglets (sac, classement), comme le /carnet de CRIT.
 
 Fichier de l'événement Halloween 2026 : à supprimer avec le plugin (voir RETRAIT_HALLOWEEN.md),
 ainsi que son enregistrement dans `bot.py`.
@@ -11,7 +11,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from maria_core.app import App
-from maria_core.discord.hub import Hub, Run, Tab, body, refuse, tab_bar, title, wide
+from maria_core.discord.hub import Hub, Run, Tab, body, refuse, tab_bar, thin, title, wide
 from maria_core.discord.layout import emojis
 from maria_core.plugins.halloween import (
     CANDY,
@@ -26,23 +26,10 @@ from maria_core.plugins.halloween import (
 )
 
 _TABS = (
-    ("door", "Porte", PUMPKIN),
     ("bag", "Sac", CANDY),
     ("ranking", "Classement", GOBLET),
 )
-_INTRO = (
-    "Tu te tiens devant la porte d'un vieux manoir, une citrouille grimaçante te regarde.\n"
-    "Sonne pour tenter ta chance : des bonbons, ou un sort."
-)
-
-
-class _Ring(discord.ui.Button):
-    def __init__(self, hub: "HalloweenHub", *, disabled: bool) -> None:
-        super().__init__(label="Sonner", style=discord.ButtonStyle.success, disabled=disabled)
-        self.hub = hub
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        await self.hub.ring(interaction)
+_EVENT = "Halloween · jusqu'au 1er novembre"
 
 
 class HalloweenHub(Hub):
@@ -50,53 +37,34 @@ class HalloweenHub(Hub):
         super().__init__(viewer_id=who.user)
         self.app = app
         self.who = who
-        self.screen = "door"
-        self.status: dict[str, Any] = {}  # dernier état connu du sac : sonneries restantes
-        self.rung: dict[str, Any] = {}  # dernière sonnerie, affichée sur la porte
-        self.page: dict[str, Any] = {}  # contenu de l'onglet Sac ou Classement
+        self.screen = "bag"
+        self.page: dict[str, Any] = {}
 
     async def load(self) -> None:
-        self.status = await play(self.app.database, self.who, "bag")
+        self.page = await play(self.app.database, self.who, self.screen)
 
     def build(self) -> None:
-        door = self.screen == "door"
-        shown = self.rung if door else self.page
-        text = result_text(shown) if shown else _INTRO
-        foot = status_text(shown if shown else self.status)
         content: list[discord.ui.Item] = [
-            title(f"{PUMPKIN} Bonbons ou sort", "Halloween · jusqu'au 1er novembre"),
+            title(f"{PUMPKIN} Bonbons ou sort"),
             wide(),
-            body(text),
-            discord.ui.TextDisplay(f"-# {emojis(foot)}"),
+            body(result_text(self.page)),
+            discord.ui.TextDisplay(f"-# {emojis(status_text(self.page))}"),
+            thin(),
+            discord.ui.TextDisplay(f"-# {_EVENT}"),
         ]
-        rows = []
-        if door:
-            left = int(self.status.get("rings_left") or 0)
-            rows.append(discord.ui.ActionRow(_Ring(self, disabled=left <= 0)))
         tabs = [
             Tab(label, self._show(name), active=self.screen == name, emoji=emoji)
             for name, label, emoji in _TABS
         ]
-        self.set_layout(content, *rows, above=tab_bar(tabs))
+        self.set_layout(content, above=tab_bar(tabs))
 
     def _show(self, screen: str) -> Run:
         async def run(interaction: discord.Interaction) -> None:
-            await self.go(interaction, screen)
+            self.screen = screen
+            await self.load()
+            await self.refresh(interaction)
 
         return run
-
-    async def go(self, interaction: discord.Interaction, screen: str) -> None:
-        self.screen = screen
-        if screen != "door":
-            self.page = await play(self.app.database, self.who, screen)
-            if screen == "bag":
-                self.status = self.page
-        await self.refresh(interaction)
-
-    async def ring(self, interaction: discord.Interaction) -> None:
-        self.rung = self.status = await play(self.app.database, self.who, "ring")
-        self.screen = "door"
-        await self.refresh(interaction)
 
 
 class HalloweenCog(commands.Cog):
@@ -105,7 +73,7 @@ class HalloweenCog(commands.Cog):
         self.app = app
 
     @app_commands.command(
-        name="halloween", description="Bonbons ou sort : sonne, ton sac, le classement"
+        name="halloween", description="Bonbons ou sort : ton sac et le classement"
     )
     @app_commands.guild_only()
     async def halloween(self, interaction: discord.Interaction) -> None:
