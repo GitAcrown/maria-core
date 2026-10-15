@@ -425,3 +425,18 @@ def test_talking_to_maria_elsewhere_does_not_close_the_door_here() -> None:
     assert pressure.allow(7, 1, author_pace=1, channel_pace=1)
     assert not pressure.allow(7, 1, author_pace=1, channel_pace=1)
     assert pressure.allow(7, 2, author_pace=1, channel_pace=1)
+
+
+async def test_typing_starts_before_the_model_is_even_asked(tmp_path: Path) -> None:
+    client = ScriptedClient([Completion(text="ok", model="fake")])
+    service, database = _open(tmp_path, client)
+    asked_when_started: list[int] = []
+
+    @asynccontextmanager
+    async def thinking() -> AsyncIterator[None]:
+        asked_when_started.append(len(client.seen))
+        yield
+
+    await service.handle(_message(mentioned=True), thinking=thinking)
+    assert asked_when_started == [0]
+    database.close()

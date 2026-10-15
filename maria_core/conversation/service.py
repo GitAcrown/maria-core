@@ -146,10 +146,14 @@ class ConversationService:
         self._history(message.channel_id).add(user_entry(message, addressed=True))
         if await self._react_instead(message, route):
             return None
-        latest = await self._debouncer.submit(message)
-        if latest is None:
-            return None
-        return await self._answer(latest, policy, route, thinking)
+        # Un appel clair (mention, réponse) montre « écrit… » tout de suite ; quand le modèle peut
+        # choisir une simple réaction, l'indicateur attend l'appel au modèle.
+        early = thinking is not None and not can_stay_silent(message, route)
+        async with thinking() if early and thinking is not None else nullcontext():
+            latest = await self._debouncer.submit(message)
+            if latest is None:
+                return None
+            return await self._answer(latest, policy, route, None if early else thinking)
 
     async def transcribe(self, audio: AudioRef) -> str:
         try:
