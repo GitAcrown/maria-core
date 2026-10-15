@@ -3,7 +3,9 @@
 from collections.abc import Mapping
 from typing import Any
 
-_LISTEN = frozenset({"on_topic", "on_message", "on_reply_to"})
+_LISTEN = frozenset(
+    {"on_topic", "on_mention", "on_post", "on_link", "on_attachment", "on_reaction", "on_reply_to"}
+)
 _RECURRING = frozenset({"daily", "weekly", "interval"})
 _OPS = {
     "pause": "en pause",

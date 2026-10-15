@@ -8,7 +8,11 @@ TRIGGERS = [
     "weekly",
     "interval",
     "on_topic",
-    "on_message",
+    "on_mention",
+    "on_post",
+    "on_link",
+    "on_attachment",
+    "on_reaction",
     "on_reply_to",
     "on_voice",
     "on_member_join",
@@ -44,7 +48,10 @@ GUIDE = (
     "pour le film « Le Corset » : sans « le film », sans guillemets ; autres façons de le dire "
     "après des virgules) ET topic = le sujet complet (« le film Le Corset »), que JEV vérifie "
     "sur chaque message trouvé. « quand JE dis » → author=self. Vocal : on_voice + voice_event "
-    "(join/leave/stream) + target_user_id. Une fois par défaut ; repeat=true pour chaque fois.\n"
+    "(join/leave/stream) + target_user_id. Autres écoutes précises, sans modèle : on_mention "
+    "(target_user_id, sinon la personne qui demande), on_post (target_user_id = qui écrit), "
+    "on_link (pattern = site ou mot, facultatif), on_attachment (media = image/video/audio/file, "
+    "facultatif), on_reaction (emoji). Une fois par défaut ; repeat=true pour chaque fois.\n"
     "- text s'adresse à la PERSONNE QUI DEMANDE (« tu »), jamais à propos d'elle : ne cite pas "
     "son nom. Pour une écoute, c'est quelqu'un d'autre qui parlera : « Quelqu'un parle du film Le "
     "Corset » (le message est cité dessous). Pour un rappel : « Tu devais sortir le chien ».\n"
@@ -110,6 +117,8 @@ def _fields() -> dict[str, Any]:
             "description": "others (défaut), self, any, ou un id Discord",
         },
         "voice_event": {"type": "string", "enum": ["join", "leave", "stream"]},
+        "emoji": {"type": "string", "description": "Emoji guetté (on_reaction), tel quel"},
+        "media": {"type": "string", "enum": ["image", "video", "audio", "file"]},
         "target_user_id": {"type": "string", "description": "Id Discord de la personne guettée"},
         "voice_channel_id": {"type": "string"},
         "repeat": {"type": "boolean", "description": "Écoute répétée au lieu d'une seule fois"},

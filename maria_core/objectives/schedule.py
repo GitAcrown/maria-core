@@ -10,7 +10,19 @@ from zoneinfo import ZoneInfo
 
 PARIS = ZoneInfo("Europe/Paris")
 
-EVENT_TRIGGERS = frozenset({"on_message", "on_topic", "on_voice", "on_member_join", "on_reply_to"})
+EVENT_TRIGGERS = frozenset(
+    {
+        "on_topic",
+        "on_mention",
+        "on_post",
+        "on_link",
+        "on_attachment",
+        "on_reaction",
+        "on_voice",
+        "on_member_join",
+        "on_reply_to",
+    }
+)
 _DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _ALIASES = {
     "lundi": "mon",
@@ -125,6 +137,22 @@ def _every(seconds: int) -> str:
     return f"toutes les {minutes} min"
 
 
+_MEDIA = {"image": "une image", "video": "une vidéo", "audio": "un son", "file": "un fichier"}
+_DESCRIPTIONS = {
+    "on_mention": lambda t: (
+        f"quand <@{t['user_id']}> est mentionné" if t.get("user_id") else "quand on te mentionne"
+    ),
+    "on_post": lambda t: f"quand <@{t.get('user_id')}> écrit",
+    "on_link": lambda t: (
+        "quand un lien est posté" + (f" ({t['pattern']})" if t.get("pattern") else "")
+    ),
+    "on_attachment": lambda t: (
+        f"quand {_MEDIA.get(str(t.get('media')), 'un fichier ou une image')} est posté"
+    ),
+    "on_reaction": lambda t: f"quand quelqu'un réagit avec {t.get('emoji') or '?'}",
+}
+
+
 def _describe_event(kind: str, trigger: Mapping[str, Any]) -> str:
     if kind == "on_topic":
         topic = trigger.get("topic") or trigger.get("pattern") or "?"
@@ -133,8 +161,8 @@ def _describe_event(kind: str, trigger: Mapping[str, Any]) -> str:
         return _SIGNALS.get(str(trigger.get("signal") or "join"), "vocal")
     if kind == "on_member_join":
         return "quand un membre arrive"
-    if kind == "on_message":
-        return "à chaque message du salon"
+    if kind in _DESCRIPTIONS:
+        return _DESCRIPTIONS[kind](trigger)
     if kind == "on_reply_to":
         return "quand on répond à MARIA"
     return kind

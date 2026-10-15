@@ -63,24 +63,56 @@ class Matcher:
 def matches(objective: Objective, signal: ObjectiveSignal) -> bool:
     if objective.guild_id is not None and objective.guild_id != signal.guild_id:
         return False
-    kind = str(objective.trigger.get("type") or "")
+    trigger = objective.trigger
+    kind = str(trigger.get("type") or "")
     if kind == "on_voice":
-        return _voice(objective.trigger, signal)
+        return _voice(trigger, signal)
     if kind == "on_member_join":
         return signal.kind == "join"
-    if signal.kind != "message":
-        return False
     if objective.channel_ids and signal.channel_id not in objective.channel_ids:
         return False
-    if not _author_ok(objective, signal):
+    test = _TESTS.get(kind)
+    if test is None or signal.kind not in _KINDS.get(kind, {"message"}):
         return False
-    if kind == "on_message":
-        return True
-    if kind == "on_reply_to":
-        return signal.reply_to_bot
-    if kind == "on_topic":
-        return _words_match(objective.trigger, signal.text)
-    return False
+    if kind != "on_post" and not _author_ok(objective, signal):
+        return False
+    return test(objective, signal)
+
+
+def _mentions(objective: Objective, signal: ObjectiveSignal) -> bool:
+    target = objective.trigger.get("user_id")
+    return (target if isinstance(target, int) else objective.owner_id) in signal.mentioned_ids
+
+
+def _posted_by(objective: Objective, signal: ObjectiveSignal) -> bool:
+    return objective.trigger.get("user_id") == signal.user_id
+
+
+def _link(objective: Objective, signal: ObjectiveSignal) -> bool:
+    wanted = _fold(str(objective.trigger.get("pattern") or "")).strip()
+    return signal.has_link and (not wanted or wanted in _fold(signal.text))
+
+
+def _attachment(objective: Objective, signal: ObjectiveSignal) -> bool:
+    wanted = str(objective.trigger.get("media") or "")
+    return bool(signal.media) and (not wanted or wanted in signal.media)
+
+
+def _reaction(objective: Objective, signal: ObjectiveSignal) -> bool:
+    wanted = str(objective.trigger.get("emoji") or "").strip()
+    return bool(wanted) and wanted in {signal.emoji, f":{signal.emoji_name}:", signal.emoji_name}
+
+
+_TESTS: dict[str, Callable[[Objective, ObjectiveSignal], bool]] = {
+    "on_reply_to": lambda _objective, signal: signal.reply_to_bot,
+    "on_topic": lambda objective, signal: _words_match(objective.trigger, signal.text),
+    "on_mention": _mentions,
+    "on_post": _posted_by,
+    "on_link": _link,
+    "on_attachment": _attachment,
+    "on_reaction": _reaction,
+}
+_KINDS = {"on_reaction": {"reaction"}}
 
 
 def word_in(text: str, term: str) -> bool:

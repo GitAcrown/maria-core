@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 
 import discord
 from discord.ext import commands
@@ -209,5 +210,24 @@ def _publish_signal(app: App, inbound: Inbound, url: str) -> None:
             url=url,
             message_id=inbound.message_id,
             author_is_bot=inbound.author_is_bot,
+            mentioned_ids=inbound.mentioned_ids,
+            has_link=_LINK.search(inbound.text) is not None,
+            media=_media_kinds(inbound),
         )
     )
+
+
+_LINK = re.compile(r"https?://\S+", re.IGNORECASE)
+
+
+def _media_kinds(inbound: Inbound) -> tuple[str, ...]:
+    """Ce que le message contient : image, vidéo, son, fichier."""
+    found: list[str] = []
+    if inbound.images:
+        found.append("image")
+    if inbound.audio is not None:
+        found.append("audio")
+    for item in inbound.files:
+        kind = str(item.content_type or "").split("/")[0]
+        found.append(kind if kind in {"video", "audio", "image"} else "file")
+    return tuple(dict.fromkeys(found))

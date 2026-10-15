@@ -101,8 +101,6 @@ def test_in_minutes_and_past_dates() -> None:
 
 
 def test_plans_that_would_spam_are_refused() -> None:
-    with pytest.raises(ValueError, match="judge"):
-        check_plan({"type": "on_message"}, None, {"type": "remind"})
     with pytest.raises(ValueError, match="fetch_then"):
         check_plan({"type": "daily"}, {"type": "price_below"}, {"type": "remind"})
     with pytest.raises(ValueError, match="6 h"):
@@ -512,3 +510,59 @@ async def test_a_listening_phrase_is_checked_by_the_judge_before_it_fires(tmp_pa
     assert await service.matcher.handle(signal("m:3", "j'ai vu Le Corset hier"), now=clock[0]) == 1
     assert len(courier.sent) == 1
     database.close()
+
+
+def _signal(kind: str = "message", **fields: object) -> ObjectiveSignal:
+    base: dict[str, object] = {
+        "kind": kind,
+        "key": "k",
+        "channel_id": 3,
+        "guild_id": 5,
+        "user_id": 8,
+    }
+    return ObjectiveSignal(**{**base, **fields})  # type: ignore[arg-type]
+
+
+def test_precise_triggers_replace_the_judged_every_message_one() -> None:
+    types = _types()
+    with pytest.raises(ValueError, match="Type inconnu"):
+        compile_trigger({"trigger_type": "on_message"}, types)
+    with pytest.raises(ValueError, match="target_user_id"):
+        compile_trigger({"trigger_type": "on_post"}, types)
+    with pytest.raises(ValueError, match="emoji"):
+        compile_trigger({"trigger_type": "on_reaction"}, types)
+    with pytest.raises(ValueError, match="media"):
+        compile_trigger({"trigger_type": "on_attachment", "media": "gif"}, types)
+    assert compile_trigger({"trigger_type": "on_mention"}, types)["type"] == "on_mention"
+
+
+def test_mentions_posts_links_attachments_and_reactions_are_matched_without_a_model() -> None:
+    mention = _objective({"type": "on_mention", "author": "others"})  # propriétaire : 7
+    assert matches(mention, _signal(mentioned_ids=(7, 9)))
+    assert not matches(mention, _signal(mentioned_ids=(9,)))
+    assert not matches(mention, _signal(mentioned_ids=(7,), user_id=7))
+    other = _objective({"type": "on_mention", "user_id": 9})
+    assert matches(other, _signal(mentioned_ids=(9,)))
+
+    post = _objective({"type": "on_post", "user_id": 8})
+    assert matches(post, _signal())
+    assert not matches(post, _signal(user_id=9))
+
+    link = _objective({"type": "on_link", "pattern": "YouTube.com"})
+    assert matches(link, _signal(text="regarde https://www.youtube.com/x", has_link=True))
+    assert not matches(link, _signal(text="regarde https://exemple.fr", has_link=True))
+    assert not matches(link, _signal(text="youtube.com sans lien", has_link=False))
+    assert matches(_objective({"type": "on_link"}), _signal(has_link=True))
+
+    attachment = _objective({"type": "on_attachment", "media": "image"})
+    assert matches(attachment, _signal(media=("image", "file")))
+    assert not matches(attachment, _signal(media=("video",)))
+    assert not matches(attachment, _signal())
+    assert matches(_objective({"type": "on_attachment"}), _signal(media=("file",)))
+
+    reaction = _objective({"type": "on_reaction", "emoji": "📌", "author": "any"})
+    assert matches(reaction, _signal("reaction", emoji="📌", emoji_name="📌"))
+    assert not matches(reaction, _signal("reaction", emoji="👍", emoji_name="👍"))
+    assert not matches(reaction, _signal(emoji="📌"))  # un message n'est pas une réaction
+    custom = _objective({"type": "on_reaction", "emoji": ":m_chart:", "author": "any"})
+    assert matches(custom, _signal("reaction", emoji="<:m_chart:1>", emoji_name="m_chart"))

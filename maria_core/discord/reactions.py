@@ -10,6 +10,7 @@ from discord.ext import commands
 
 from maria_core.app import App
 from maria_core.conversation.model import ReplyMode
+from maria_core.objectives.signals import ObjectiveSignal
 from maria_core.social.service import ReactionSeen
 from maria_core.ui.emojis import FALLBACKS, TRANSCRIPT
 
@@ -54,6 +55,7 @@ class ReactionCog(commands.Cog):
         if payload.member is not None and payload.member.bot:
             return
         emoji = str(payload.emoji)
+        self._publish(payload, emoji)
         if not self.usable(emoji):
             return
         author_id, author_is_bot, age, excerpt = await self._facts(payload)
@@ -70,6 +72,26 @@ class ReactionCog(commands.Cog):
                 age_s=age,
                 excerpt=excerpt,
                 enabled=enabled,
+            )
+        )
+
+    def _publish(self, payload: discord.RawReactionActionEvent, emoji: str) -> None:
+        """Une réaction posée par quelqu'un : les écoutes d'emoji la voient."""
+        channel = self.bot.get_channel(payload.channel_id)
+        place = getattr(channel, "parent_id", None) or payload.channel_id
+        member = payload.member
+        self.app.events.publish_soon(
+            ObjectiveSignal(
+                kind="reaction",
+                key=f"reaction:{payload.message_id}:{payload.user_id}:{emoji}",
+                channel_id=int(place),
+                guild_id=payload.guild_id,
+                user_id=payload.user_id,
+                author_name=member.display_name if member is not None else "",
+                url=f"https://discord.com/channels/{payload.guild_id}/{payload.channel_id}/{payload.message_id}",
+                message_id=payload.message_id,
+                emoji=emoji,
+                emoji_name=payload.emoji.name or "",
             )
         )
 
