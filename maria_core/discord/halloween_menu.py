@@ -11,7 +11,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from maria_core.app import App
-from maria_core.discord.hub import Hub, body, refuse, thin, title, wide
+from maria_core.discord.hub import Hub, Run, Tab, body, refuse, tab_bar, title, wide
 from maria_core.discord.layout import emojis
 from maria_core.plugins.halloween import (
     CANDY,
@@ -34,22 +34,6 @@ _INTRO = (
     "Tu te tiens devant la porte d'un vieux manoir, une citrouille grimaçante te regarde.\n"
     "Sonne pour tenter ta chance : des bonbons, ou un sort."
 )
-
-
-class _Tab(discord.ui.Button):
-    def __init__(self, hub: "HalloweenHub", screen: str, label: str, emoji: str) -> None:
-        super().__init__(
-            label=label,
-            emoji=discord.PartialEmoji.from_str(emojis(emoji)),
-            style=discord.ButtonStyle.primary
-            if hub.screen == screen
-            else discord.ButtonStyle.secondary,
-        )
-        self.hub = hub
-        self.screen = screen
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        await self.hub.go(interaction, self.screen)
 
 
 class _Ring(discord.ui.Button):
@@ -75,9 +59,6 @@ class HalloweenHub(Hub):
         self.status = await play(self.app.database, self.who, "bag")
 
     def build(self) -> None:
-        self.clear_items()
-        tabs = (_Tab(self, name, label, emoji) for name, label, emoji in _TABS)
-        self.add_item(discord.ui.ActionRow(*tabs))
         door = self.screen == "door"
         shown = self.rung if door else self.page
         text = result_text(shown) if shown else _INTRO
@@ -88,10 +69,21 @@ class HalloweenHub(Hub):
             body(text),
             discord.ui.TextDisplay(f"-# {emojis(foot)}"),
         ]
+        rows = []
         if door:
             left = int(self.status.get("rings_left") or 0)
-            content += [thin(), discord.ui.ActionRow(_Ring(self, disabled=left <= 0))]
-        self.add_item(discord.ui.Container(*content))
+            rows.append(discord.ui.ActionRow(_Ring(self, disabled=left <= 0)))
+        tabs = [
+            Tab(label, self._show(name), active=self.screen == name, emoji=emoji)
+            for name, label, emoji in _TABS
+        ]
+        self.set_layout(content, *rows, above=tab_bar(tabs))
+
+    def _show(self, screen: str) -> Run:
+        async def run(interaction: discord.Interaction) -> None:
+            await self.go(interaction, screen)
+
+        return run
 
     async def go(self, interaction: discord.Interaction, screen: str) -> None:
         self.screen = screen

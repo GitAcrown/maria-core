@@ -13,10 +13,13 @@ from maria_core.discord.hub import (
     Hub,
     Picker,
     Run,
+    Tab,
+    arrows,
     body,
     clip,
     option,
     pages,
+    tab_bar,
     thin,
     title,
     wide,
@@ -24,6 +27,7 @@ from maria_core.discord.hub import (
 from maria_core.memory.model import Memory, Proposal
 from maria_core.memory.policy import Actor
 from maria_core.memory.store import MemoryDenied
+from maria_core.ui.emojis import SMALL_BRAIN
 
 PAGE = 15
 _RED = discord.ButtonStyle.danger
@@ -110,26 +114,19 @@ class MemoryHub(Hub):
             content.append(body(f"-# Page {self.page + 1}/{total}"))
         if self.note:
             content.append(body(f"-# {self.note}"))
-        self.set_layout(content, *self._catalog_rows(shown, total))
+        self.set_layout(content, *self._catalog_rows(shown, total), above=tab_bar(self._tabs()))
 
     def _catalog_rows(
         self, shown: tuple[Memory, ...] | tuple[Proposal, ...], total: int
     ) -> list[discord.ui.ActionRow]:
         rows: list[discord.ui.ActionRow] = []
-        tabs = self._tabs()
-        if len(tabs) > 1:
-            rows.append(discord.ui.ActionRow(*tabs))
         if shown:
             options = [option(item.id, item.content, _when(item)) for item in shown]
             rows.append(discord.ui.ActionRow(Picker("Ouvrir…", options, self._open)))
         controls: list[discord.ui.Item] = []
         if not self.state.collective:
             controls.append(Action("Ajouter", self._add, style=discord.ButtonStyle.primary))
-        if total > 1:
-            controls += [
-                Action("←", self._turn(-1), disabled=self.page == 0),
-                Action("→", self._turn(1), disabled=self.page >= total - 1),
-            ]
+        controls += arrows(self.page, total, self._turn)
         if self.state.memories and self._may_edit() and self.tab == "memories":
             controls.append(Action("Tout effacer", self._ask_reset, style=_RED))
         if controls:
@@ -157,8 +154,8 @@ class MemoryHub(Hub):
         if self._may_edit():
             buttons += [
                 Action("Modifier", self._edit, style=discord.ButtonStyle.primary),
-                Action("Oublier", self._forget, style=discord.ButtonStyle.danger),
                 Action("Annuler la modif", self._undo),
+                Action("Oublier", self._forget, style=discord.ButtonStyle.danger),
             ]
         buttons.append(Action("Retour", self._back))
         self.set_layout(content, discord.ui.ActionRow(*buttons))
@@ -223,12 +220,12 @@ class MemoryHub(Hub):
             return self.state.proposals
         return self.state.recent if self.tab == "recent" else self.state.memories
 
-    def _tabs(self) -> list[Action]:
-        tabs = [self._tab("memories", "Souvenirs")]
+    def _tabs(self) -> list[Tab]:
+        tabs = [self._tab("memories", "Souvenirs", SMALL_BRAIN)]
         if self.state.recent:
-            tabs.append(self._tab("recent", f"Appris récemment ({len(self.state.recent)})"))
+            tabs.append(self._tab("recent", f"Appris récemment ({len(self.state.recent)})", "✨"))
         if self.state.proposals:
-            tabs.append(self._tab("proposals", f"À valider ({len(self.state.proposals)})"))
+            tabs.append(self._tab("proposals", f"À valider ({len(self.state.proposals)})", "📥"))
         return tabs
 
     def _age(self, item: Memory | Proposal) -> str:
@@ -242,14 +239,12 @@ class MemoryHub(Hub):
     def _may_edit(self) -> bool:
         return not self.state.collective or self.state.can_manage
 
-    def _tab(self, tab: str, label: str) -> Action:
-        style = discord.ButtonStyle.primary if self.tab == tab else discord.ButtonStyle.secondary
-
+    def _tab(self, tab: str, label: str, emoji: str) -> Tab:
         async def run(interaction: discord.Interaction) -> None:
             self.tab, self.page, self.note = tab, 0, ""
             await self.refresh(interaction)
 
-        return Action(label, run, style=style)
+        return Tab(label, run, active=self.tab == tab, emoji=emoji)
 
     def _turn(self, delta: int) -> Run:
         async def run(interaction: discord.Interaction) -> None:

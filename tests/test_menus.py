@@ -147,5 +147,23 @@ async def test_task_hub_names_each_kind_and_confirms_deletion() -> None:
     assert _labels(hub) == ["Modifier", "Pause", "Passer une fois", "Supprimer", "Retour"]
     hub.screen, hub.pending = "confirm", "cancel"
     hub.build()
-    assert "## Supprimer ?" in _texts(hub)
-    assert _labels(hub) == ["Oui", "Non"]
+    assert "**Supprimer ?**" in _texts(hub)
+    assert "## " in _texts(hub) and "**Quand**" in _texts(hub)  # la fiche reste visible
+    assert _labels(hub) == ["Supprimer", "Annuler"]
+
+
+async def test_task_hub_tabs_filter_by_family_and_only_show_those_present() -> None:
+    app: Any = SimpleNamespace()
+    hub = TaskHub(app, 7)
+    hub.objectives = (
+        _objective(1, {"type": "at", "at": "2026-10-14T09:00"}),
+        _objective(2, {"type": "on_topic", "topic": "jeux"}, action={"type": "alert"}),
+        _objective(3, {"type": "at", "at": "2026-10-16T09:00"}),
+    )
+    hub.build()
+    tabs = [item for item in hub.children[0].children if isinstance(item, discord.ui.Button)]
+    assert [tab.label for tab in tabs] == ["Tout (3)", "Rappels (2)", "Écoutes (1)"]
+    assert tabs[0].style == discord.ButtonStyle.primary
+    hub.group = "listening"
+    hub.build()
+    assert "Tâche 2" in _texts(hub) and "Tâche 1" not in _texts(hub)

@@ -5,10 +5,22 @@ import asyncio
 import discord
 
 from maria_core.app import App
-from maria_core.discord.hub import Action, Hub, Picker, body, option, thin, title, wide
+from maria_core.discord.hub import (
+    Action,
+    Hub,
+    Picker,
+    Run,
+    Tab,
+    body,
+    option,
+    tab_bar,
+    thin,
+    title,
+    wide,
+)
 from maria_core.profile.service import Resolved
 from maria_core.profile.slots import BY_KEY, FACTS, STYLE, Slot
-from maria_core.ui.emojis import SLOT_ICONS
+from maria_core.ui.emojis import SLOT_ICONS, SMALL_BRAIN
 
 _PROVENANCE = {
     "user": "réglé par toi",
@@ -27,6 +39,7 @@ class ProfileHub(Hub):
         self.user_id = user_id
         self.name = name
         self.screen = "catalog"
+        self.tab = "facts"
         self.selected = ""
         self.note = ""
         self.found: dict[str, Resolved] = {}
@@ -42,29 +55,44 @@ class ProfileHub(Hub):
             self._catalog()
 
     def _catalog(self) -> None:
+        facts = self.tab == "facts"
+        slots = FACTS if facts else STYLE
+        text = "\n".join(self._line(slot) for slot in slots)
+        if not facts:
+            text += (
+                "\n-# Le style se déduit de la longueur et du ton de tes messages, "
+                "jamais de leur contenu."
+            )
         content: list[discord.ui.Item] = [
             title(f"Profil · {self.name}", "MARIA s'en sert toute seule, tu peux tout changer"),
             wide(),
-            body("### Ce qu'elle sait\n" + "\n".join(self._line(slot) for slot in FACTS)),
-            thin(),
-            body(
-                "### Comment elle te parle\n"
-                + "\n".join(self._line(slot) for slot in STYLE)
-                + "\n-# Le style se déduit de la longueur et du ton de tes messages, "
-                "jamais de leur contenu."
-            ),
+            body(text),
         ]
         if self.note:
-            content += [thin(), body(f"-# {self.note}")]
+            content.append(body(f"-# {self.note}"))
         options = [
             option(slot.key, slot.label, self._plain(slot), SLOT_ICONS.get(slot.key, ""))
-            for slot in (*FACTS, *STYLE)
+            for slot in slots
         ]
-        rows = [
-            discord.ui.ActionRow(Picker("Modifier un champ…", options, self._open)),
-            discord.ui.ActionRow(Action("Réinitialiser le style", self._reset, style=_RED)),
+        rows = [discord.ui.ActionRow(Picker("Modifier un champ…", options, self._open))]
+        if not facts:
+            reset = Action("Réinitialiser le style", self._reset, style=_RED)
+            rows.append(discord.ui.ActionRow(reset))
+        self.set_layout(content, *rows, above=tab_bar(self._tabs()))
+
+    def _tabs(self) -> list[Tab]:
+        facts, style = self.tab == "facts", self.tab == "style"
+        return [
+            Tab("Ce qu'elle sait", self._show("facts"), active=facts, emoji=SMALL_BRAIN),
+            Tab("Comment elle te parle", self._show("style"), active=style, emoji="💬"),
         ]
-        self.set_layout(content, *rows)
+
+    def _show(self, tab: str) -> Run:
+        async def run(interaction: discord.Interaction) -> None:
+            self.tab, self.note = tab, ""
+            await self.refresh(interaction)
+
+        return run
 
     def _slot(self, slot: Slot) -> None:
         current = self.found.get(slot.key)
