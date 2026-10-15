@@ -187,8 +187,13 @@ async def test_the_profile_menu_shows_values_and_where_they_come_from(tmp_path: 
     assert "## Profil · Lea" in texts
     assert "**Ville** · Lyon  -# réglé par toi" in texts
     assert "**Équipe de foot** · OM  -# appris par MARIA, modifiable" in texts
-    assert "**Ton** · *par défaut*" in texts
     assert len(list(hub.walk_children())) <= 40
+    hub.tab = "style"
+    hub.build()
+    style = " ".join(
+        item.content for item in hub.walk_children() if isinstance(item, discord.ui.TextDisplay)
+    )
+    assert "**Ton** · *par défaut*" in style and "**Ville**" not in style
     hub.selected, hub.screen = "city", "slot"
     hub.build()
     labels = [

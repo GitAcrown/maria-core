@@ -27,9 +27,17 @@ class Hub(discord.ui.LayoutView):
     def build(self) -> None:
         raise NotImplementedError
 
-    def set_layout(self, body: Sequence[discord.ui.Item], *rows: discord.ui.ActionRow) -> None:
-        """Le contenu, un trait fin, puis les contrôles, dans un seul conteneur."""
+    def set_layout(
+        self,
+        body: Sequence[discord.ui.Item],
+        *rows: discord.ui.ActionRow,
+        above: Sequence[discord.ui.Item] = (),
+    ) -> None:
+        """Comme dans CRIT : les onglets (`above`) au-dessus de la carte, puis, dans un seul
+        conteneur, le contenu, un trait fin et les contrôles."""
         self.clear_items()
+        for item in above:
+            self.add_item(item)
         children = list(body)
         if rows:
             children.append(thin())
@@ -107,6 +115,37 @@ class Action(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await self.run(interaction)
+
+
+class Tab(discord.ui.Button):
+    """Un onglet : l'actif est en bleu, les autres en gris, avec un emoji comme dans CRIT."""
+
+    def __init__(self, label: str, run: Run, *, active: bool, emoji: str = "") -> None:
+        mark = emojis(emoji) if emoji else ""
+        super().__init__(
+            label=label or None,
+            emoji=discord.PartialEmoji.from_str(mark) if mark else None,
+            style=discord.ButtonStyle.primary if active else discord.ButtonStyle.secondary,
+        )
+        self.run = run
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.run(interaction)
+
+
+def tab_bar(tabs: Sequence[Tab]) -> list[discord.ui.Item]:
+    """La rangée d'onglets, à passer en `above` ; rien s'il n'y a pas de choix à faire."""
+    return [discord.ui.ActionRow(*tabs[:5])] if len(tabs) > 1 else []
+
+
+def arrows(page: int, total: int, turn: Callable[[int], Run]) -> list[discord.ui.Item]:
+    """← et → de la pagination, absents quand tout tient sur une page."""
+    if total <= 1:
+        return []
+    return [
+        Action("←", turn(-1), disabled=page <= 0),
+        Action("→", turn(1), disabled=page >= total - 1),
+    ]
 
 
 async def refuse(interaction: discord.Interaction, reason: str) -> None:

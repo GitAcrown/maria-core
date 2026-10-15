@@ -10,10 +10,13 @@ from maria_core.discord.hub import (
     Hub,
     Picker,
     Run,
+    Tab,
+    arrows,
     body,
     clip,
     option,
     pages,
+    tab_bar,
     thin,
     title,
     wide,
@@ -23,14 +26,30 @@ from maria_core.objectives.labels import condition_text, kind_label, status_labe
 from maria_core.objectives.model import Objective, ObjectiveQuota, StaleObjective
 from maria_core.objectives.schedule import describe
 from maria_core.objectives.tools import operate
-from maria_core.ui.emojis import KIND_ICONS
+from maria_core.ui.emojis import EVENT_TASK, KIND_ICONS, SMALL_TASK
 
 PAGE = 5
 _RANK = {"draft": 0, "active": 1, "paused": 2, "failed": 3}
 _CONFIRM = {
-    "cancel": ("Supprimer ?", "La tâche disparaît pour de bon."),
-    "skip": ("Passer une fois ?", "La prochaine occurrence est sautée."),
+    "cancel": ("Supprimer", "La tâche disparaît pour de bon."),
+    "skip": ("Passer une fois", "La prochaine occurrence est sautée."),
 }
+_GROUPS = (
+    ("all", "Tout", "🗓️", frozenset()),
+    (
+        "reminders",
+        "Rappels",
+        SMALL_TASK,
+        frozenset({"Rappel", "Rappel récurrent", "Tâche programmée", "Tâche"}),
+    ),
+    (
+        "listening",
+        "Écoutes",
+        EVENT_TASK,
+        frozenset({"Écoute", "Alerte vocale", "Alerte d'arrivée"}),
+    ),
+    ("watching", "Veilles", "🔎", frozenset({"Surveillance", "Veille de prix"})),
+)
 _DONE = {
     "pause": "En pause.",
     "resume": "Reprise.",
@@ -48,6 +67,7 @@ class TaskHub(Hub):
         self.objectives: tuple[Objective, ...] = ()
         self.page = 0
         self.screen = "catalog"
+        self.group = "all"
         self.selected: int | None = None
         self.pending = ""
         self.note = ""
@@ -71,9 +91,10 @@ class TaskHub(Hub):
 
     def _catalog(self) -> None:
         self.screen, self.selected = "catalog", None
-        total = pages(len(self.objectives), PAGE)
+        listed = self._listed()
+        total = pages(len(listed), PAGE)
         self.page = max(0, min(self.page, total - 1))
-        shown = self.objectives[self.page * PAGE : (self.page + 1) * PAGE]
+        shown = listed[self.page * PAGE : (self.page + 1) * PAGE]
         content: list[discord.ui.Item] = [title("Tâches", self._meta(total)), wide()]
         if not shown:
             content.append(
@@ -94,17 +115,35 @@ class TaskHub(Hub):
                 option(item.id, item.title, _plain_meta(item), _icon(item)) for item in shown
             ]
             rows.append(discord.ui.ActionRow(Picker("Ouvrir une tâche…", options, self._open)))
-        controls: list[discord.ui.Item] = []
-        if total > 1:
-            controls += [
-                Action("←", self._turn(-1), disabled=self.page == 0),
-                Action("→", self._turn(1), disabled=self.page >= total - 1),
-            ]
+        controls = arrows(self.page, total, self._turn)
         if self.objectives:
             controls.append(Action("Tout supprimer", self._ask_wipe, style=_RED))
         if controls:
             rows.append(discord.ui.ActionRow(*controls))
-        self.set_layout(content, *rows)
+        self.set_layout(content, *rows, above=tab_bar(self._tabs()))
+
+    def _listed(self) -> tuple[Objective, ...]:
+        kinds = next(kinds for key, _label, _icon, kinds in _GROUPS if key == self.group)
+        if not kinds:
+            return self.objectives
+        return tuple(item for item in self.objectives if _kind(item) in kinds)
+
+    def _tabs(self) -> list[Tab]:
+        """Tout, puis seulement les familles présentes, avec leur nombre."""
+        tabs: list[Tab] = []
+        for key, label, icon, kinds in _GROUPS:
+            count = sum(not kinds or _kind(item) in kinds for item in self.objectives)
+            if count or key == "all":
+                run, active = self._group(key), key == self.group
+                tabs.append(Tab(f"{label} ({count})", run, active=active, emoji=icon))
+        return tabs
+
+    def _group(self, key: str) -> Run:
+        async def run(interaction: discord.Interaction) -> None:
+            self.group, self.page, self.note = key, 0, ""
+            await self.refresh(interaction)
+
+        return run
 
     def _meta(self, total: int) -> str:
         counts = [item.status for item in self.objectives]
@@ -117,7 +156,7 @@ class TaskHub(Hub):
             bits.append(f"page {self.page + 1}/{total}")
         return " · ".join(bits)
 
-    def _detail(self, item: Objective) -> None:
+    def _fiche(self, item: Objective) -> list[discord.ui.Item]:
         kind = _kind(item)
         content: list[discord.ui.Item] = [
             title(
@@ -129,6 +168,10 @@ class TaskHub(Hub):
         ]
         if item.last_error:
             content.append(body(f"-# Dernière erreur : {clip(item.last_error, 200)}"))
+        return content
+
+    def _detail(self, item: Objective) -> None:
+        content = self._fiche(item)
         if self.note:
             content += [thin(), body(f"-# {self.note}")]
         self.set_layout(content, discord.ui.ActionRow(*self._buttons(item)))
@@ -174,13 +217,13 @@ class TaskHub(Hub):
 
     def _buttons(self, item: Objective) -> list[discord.ui.Item]:
         buttons: list[discord.ui.Item] = []
-        if item.status != "draft":
-            buttons.append(Action("Modifier", self._edit))
         if item.status == "draft":
             buttons.append(Action("Confirmer", self._run("confirm"), style=_GREEN))
         elif item.status == "paused":
             buttons.append(Action("Reprendre", self._run("resume"), style=_BLUE))
+            buttons.append(Action("Modifier", self._edit))
         else:
+            buttons.append(Action("Modifier", self._edit, style=_BLUE))
             buttons.append(Action("Pause", self._run("pause")))
             if item.next_run_at is not None and item.trigger.get("type") != "at":
                 buttons.append(Action("Passer une fois", self._ask("skip")))
@@ -189,14 +232,16 @@ class TaskHub(Hub):
         return buttons
 
     def _confirm(self, item: Objective) -> None:
-        heading, text = _CONFIRM[self.pending]
-        content = [title(heading, clip(item.title, 80)), wide(), body(text)]
+        """La fiche reste visible ; la question et ses deux boutons remplacent les actions."""
+        label, text = _CONFIRM[self.pending]
+        content = self._fiche(item)
+        content += [thin(), body(f"**{label} ?**" + chr(10) + f"-# {text}")]
         danger = self.pending == "cancel"
         self.set_layout(
             content,
             discord.ui.ActionRow(
-                Action("Oui", self._run(self.pending), style=_RED if danger else _BLUE),
-                Action("Non", self._detail_again),
+                Action(label, self._run(self.pending), style=_RED if danger else _BLUE),
+                Action("Annuler", self._detail_again),
             ),
         )
 
