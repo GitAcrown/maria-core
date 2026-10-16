@@ -99,7 +99,7 @@ class ConversationService:
         self._debouncer = debouncer or Debouncer(debounce_seconds)
         self._limits = (max_messages, max_tokens, max_age)
         self._histories: dict[int, ChannelHistory] = {}
-        self._replies: dict[int, int] = {}
+        self._replies: dict[int, tuple[int, ...]] = {}
         self._engine = engine
         self._widgets = widgets or WidgetRegistry()
         self._memory = memory
@@ -206,8 +206,9 @@ class ConversationService:
             if item.content and not item.note
         )
 
-    def remember_reply(self, user_message_id: int, bot_message_id: int) -> None:
-        self._replies[user_message_id] = bot_message_id
+    def remember_reply(self, user_message_id: int, *bot_message_ids: int) -> None:
+        """Toutes les parties de la réponse : un message édité se corrige, sans en ajouter une."""
+        self._replies[user_message_id] = tuple(bot_message_ids)
         while len(self._replies) > _REPLY_MEMORY:
             self._replies.pop(next(iter(self._replies)))
 
@@ -411,7 +412,8 @@ class ConversationService:
             )
         if self._social is not None:
             self._social.note_reply(message, text)
-        edit_id = self._replies.get(message.message_id) if message.edited else None
+        known = self._replies.get(message.message_id, ()) if message.edited else ()
+        edit_id = known[0] if len(known) == 1 else None
         return Reply(
             chunks=split_message(text) if text else (),
             user_message_id=message.message_id,
@@ -421,6 +423,7 @@ class ConversationService:
             footer=composed.footer,
             proposal_id=None if ask is None else ask.proposal_id,
             learned_id=None if ask is None else ask.learned_id,
+            previous=known,
             trace=ask.text if ask is not None and traced else "",
         )
 

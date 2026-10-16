@@ -119,7 +119,8 @@ class Inbound:
 
 @dataclass(frozen=True, slots=True)
 class Reply:
-    """Texte prêt à envoyer. `edit_message_id` désigne une réponse déjà postée."""
+    """Texte prêt à envoyer. `edit_message_id` désigne une réponse déjà postée ; `previous` liste
+    toutes ses parties, à retirer si elle ne peut pas être modifiée (une seule réponse reste)."""
 
     chunks: tuple[str, ...]
     user_message_id: int
@@ -130,6 +131,7 @@ class Reply:
     proposal_id: int | None = None
     learned_id: int | None = None
     trace: str = ""
+    previous: tuple[int, ...] = ()
 
     @property
     def text(self) -> str:

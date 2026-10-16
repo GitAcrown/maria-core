@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from dataclasses import replace
 
 import discord
 from discord.ext import commands
@@ -21,12 +22,14 @@ logger = logging.getLogger(__name__)
 
 SILENT = discord.AllowedMentions.none()
 _LIMIT = 2000
+_BUSY_LIMIT = 200
 
 
 class ChatCog(commands.Cog):
     def __init__(self, bot: commands.Bot, app: App) -> None:
         self.bot = bot
         self.app = app
+        self._busy: dict[int, asyncio.Lock] = {}
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -62,41 +65,61 @@ class ChatCog(commands.Cog):
             notices.append(SlowNotice(message))
             return notices[-1]
 
-        reply = await self.app.conversation.handle(
-            inbound, thinking=message.channel.typing, waiting=waiting
-        )
-        if reply is not None:
-            own = {notice.sent_id for notice in notices if notice.sent_id is not None}
-            await self._publish(message, reply, own)
+        # Un message édité pendant que MARIA répond attend la fin de cette réponse : sinon elle ne
+        # saurait pas encore laquelle corriger et en poserait une seconde.
+        lock = self._busy.setdefault(message.id, asyncio.Lock())
+        async with lock:
+            reply = await self.app.conversation.handle(
+                inbound, thinking=message.channel.typing, waiting=waiting
+            )
+            if reply is not None:
+                own = {notice.sent_id for notice in notices if notice.sent_id is not None}
+                await self._publish(message, reply, own)
+        if not lock.locked() and len(self._busy) > _BUSY_LIMIT:
+            self._busy = {key: item for key, item in self._busy.items() if item.locked()}
 
     async def _publish(
         self, message: discord.Message, reply: Reply, own: set[int] | None = None
     ) -> None:
         if reply.edit_message_id is not None and await _try_edit(message, reply):
             return
+        if reply.previous:
+            # Modifié sur place, ou l'ancienne réponse disparaît : jamais deux réponses.
+            await _remove(message.channel, reply.previous)
+            reply = replace(reply, reply=True)
         anchor = reply_anchor(message, reply, own or set())
         extra = _extra_view(reply)
         if reply.cards:
-            first, last = await _send_views(message.channel, reply, anchor)
+            sent = await _send_views(message.channel, reply, anchor)
             if extra is not None:
-                last = await _send_extra(message.channel, extra, reply.trace) or last
+                more = await _send_extra(message.channel, extra, reply.trace)
+                sent += [more] if more is not None else []
         else:
-            first, last = await _send_chunks(message.channel, reply, anchor, extra)
-        if first is not None:
-            self.app.conversation.remember_reply(reply.user_message_id, first)
+            sent = await _send_chunks(message.channel, reply, anchor, extra)
+        if sent:
+            self.app.conversation.remember_reply(reply.user_message_id, *sent)
+        last = sent[-1] if sent else None
         if reply.proposal_id is not None and last is not None:
             await _attach(self.app, reply.proposal_id, last)
         if reply.learned_id is not None and last is not None:
             await asyncio.to_thread(self.app.memory.learned.attach_reply, reply.learned_id, last)
 
 
+async def _remove(channel: discord.abc.Messageable, identifiers: tuple[int, ...]) -> None:
+    """Efface les parties d'une ancienne réponse, sans s'arrêter si l'une a déjà disparu."""
+    for identifier in identifiers:
+        try:
+            await channel.get_partial_message(identifier).delete()  # type: ignore[attr-defined]
+        except discord.HTTPException:
+            logger.debug("Ancienne réponse %s déjà effacée", identifier)
+
+
 async def _send_views(
     channel: discord.abc.Messageable,
     reply: Reply,
     anchor: discord.MessageReference | None,
-) -> tuple[int | None, int | None]:
-    first: int | None = None
-    last: int | None = None
+) -> list[int]:
+    sent_ids: list[int] = []
     for index, view in enumerate(
         build_views(intro=reply.text, cards=reply.cards, outro=reply.footer)
     ):
@@ -107,9 +130,8 @@ async def _send_views(
         except discord.HTTPException as exc:
             logger.warning("Vue refusée par Discord (%s), repli en texte", exc.status)
             return await _fallback_text(channel, reply, anchor)
-        first = first or sent.id
-        last = sent.id
-    return first, last
+        sent_ids.append(sent.id)
+    return sent_ids
 
 
 async def _fallback_text(
@@ -131,7 +153,7 @@ async def _send_chunks(
     reply: Reply,
     anchor: discord.MessageReference | None,
     view: discord.ui.View | None,
-) -> tuple[int | None, int | None]:
+) -> list[int]:
     chunks = [quiet_links(chunk) for chunk in reply.chunks]
     for line in (reply.footer, reply.trace):
         if not line:
@@ -140,8 +162,7 @@ async def _send_chunks(
             chunks[-1] = f"{chunks[-1]}\n{quiet_links(line)}"
         else:
             chunks.append(quiet_links(line))
-    first: int | None = None
-    last: int | None = None
+    sent_ids: list[int] = []
     final = len(chunks) - 1
     for index, chunk in enumerate(chunks):
         try:
@@ -151,10 +172,9 @@ async def _send_chunks(
             sent = await channel.send(chunk, allowed_mentions=SILENT, **kwargs)
         except discord.HTTPException:
             logger.warning("Envoi refusé dans le salon %s", getattr(channel, "id", "?"))
-            return first, last
-        first = first or sent.id
-        last = sent.id
-    return first, last
+            return sent_ids
+        sent_ids.append(sent.id)
+    return sent_ids
 
 
 async def _send_extra(
