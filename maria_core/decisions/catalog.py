@@ -198,13 +198,14 @@ def builtin_decisions() -> tuple[Decision, ...]:
         _decision(
             "followup",
             fallback="ignore",
-            threshold=0.58,
+            threshold=0.5,
             budget=400,
             ttl=15,
             rules=followup_rules,
             instructions=(
                 "The bot just answered `bot_last` to this author. Does `text` continue that "
-                "exchange with the bot (reply, follow-up question, thanks needing an answer)?"
+                "exchange with the bot (reply, follow-up question, thanks needing an answer)? "
+                "A short message right after the answer, from the same author, usually does."
             ),
             criteria={
                 "respond": "It answers or questions the bot",

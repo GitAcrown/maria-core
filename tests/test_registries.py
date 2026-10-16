@@ -7,9 +7,12 @@ import pytest
 
 from maria_core.capabilities import Capability, Context, Result, Risk
 from maria_core.decisions import Decision
+from maria_core.decisions.catalog import builtin_decisions
+from maria_core.decisions.rules import followup_rules
 from maria_core.errors import RegistryError
 from maria_core.llm import PromptSections
 from maria_core.objectives import ObjectiveKind, ObjectiveTypes
+from maria_core.social.levels import LEVELS
 
 
 async def _run(_ctx: Context, _args: Mapping[str, Any]) -> Result:
@@ -76,3 +79,13 @@ def test_decision_threshold_stays_between_zero_and_one() -> None:
         Decision(name="addressed_to_bot", threshold=1.5, fallback=False)
     decision = Decision(name="addressed_to_bot", threshold=0.65, fallback=False)
     assert decision.fallback is False
+
+
+def test_a_followup_is_caught_a_little_more_readily() -> None:
+    followup = next(item for item in builtin_decisions() if item.name == "followup")
+    assert followup.threshold == 0.5
+    assert LEVELS["normal"].followup_s == 24.0 and LEVELS["normal"].followup_depth == 3
+    assert followup_rules({"question": True, "depth": 1, "elapsed_s": 10, "same_author": True})
+    assert followup_rules({"question": True, "depth": 2, "elapsed_s": 10}) is None
+    hit = followup_rules({"question": True, "depth": 4, "elapsed_s": 10})
+    assert hit is not None and hit.value == "ignore"
