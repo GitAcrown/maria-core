@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from time import perf_counter
@@ -16,6 +17,16 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_TURNS = 6
 MAX_TOOL_CALLS = 8
 _NUDGE = "[SYSTEM] Réponds maintenant, en une réponse finale."
+_TRANSIENT = re.compile(
+    r"délai|timed? ?out|indisponible|temporar|connect|réseau|\b(?:429|500|502|503|504)\b",
+    re.IGNORECASE,
+)
+_RETRY_PAUSE_S = 0.6
+_DOWN_HINT = (
+    "Le service ne répond pas pour l'instant : dis-le en une phrase, essaie une autre piste "
+    "(autre outil, requête reformulée) si elle existe, sinon propose de réessayer plus tard. "
+    "N'invente jamais le résultat."
+)
 
 type ToolExecutor = Callable[[ToolCall], Awaitable[Result]]
 type ParallelSafe = Callable[[str], bool]
@@ -126,12 +137,19 @@ async def _run_tools(
     turn.messages.append(_assistant_message(completion))
     calls = completion.tool_calls
     base = len(turn.records)
-    if parallel_safe is not None and len(calls) > 1 and all(parallel_safe(c.name) for c in calls):
+    safe = parallel_safe or (lambda _name: False)
+    if len(calls) > 1 and all(safe(c.name) for c in calls):
         results = await asyncio.gather(
-            *(_run_tool(execute, call, base + index) for index, call in enumerate(calls))
+            *(
+                _run_tool(execute, call, base + index, safe(call.name))
+                for index, call in enumerate(calls)
+            )
         )
     else:
-        results = [await _run_tool(execute, call, base + index) for index, call in enumerate(calls)]
+        results = [
+            await _run_tool(execute, call, base + index, safe(call.name))
+            for index, call in enumerate(calls)
+        ]
     for call, result in zip(calls, results, strict=True):
         turn.records.append(ToolRecord(call.name, dict(call.arguments), result))
         turn.messages.append(_tool_message(call, result))
@@ -158,9 +176,26 @@ def _result(turn: _Turn, ok: bool, started: float) -> LoopResult:
     )
 
 
-async def _run_tool(execute: ToolExecutor, call: ToolCall, used: int) -> Result:
+def is_transient(error: str) -> bool:
+    """Un délai, un réseau coupé, un 5xx : ça peut passer au deuxième essai."""
+    return bool(_TRANSIENT.search(error or ""))
+
+
+async def _run_tool(
+    execute: ToolExecutor, call: ToolCall, used: int, retry: bool = False
+) -> Result:
+    """Une lecture qui échoue pour une raison passagère est retentée une fois."""
     if used >= MAX_TOOL_CALLS:
         return Result(ok=False, data={}, error="Plafond d'outils atteint pour ce message.")
+    result = await _attempt(execute, call)
+    if retry and not result.ok and is_transient(result.error):
+        logger.info("Outil %s en échec passager, nouvel essai : %s", call.name, result.error)
+        await asyncio.sleep(_RETRY_PAUSE_S)
+        result = await _attempt(execute, call)
+    return result
+
+
+async def _attempt(execute: ToolExecutor, call: ToolCall) -> Result:
     try:
         return await execute(call)
     except Exception as exc:
@@ -191,6 +226,8 @@ def _tool_message(call: ToolCall, result: Result) -> dict[str, Any]:
     payload: dict[str, Any] = {"ok": result.ok, **dict(result.data)}
     if result.error:
         payload["error"] = result.error
+        if is_transient(result.error):
+            payload["consigne"] = _DOWN_HINT
     return {
         "role": "tool",
         "tool_call_id": call.id,

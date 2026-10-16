@@ -71,9 +71,33 @@ def compose(outcome: LoopResult, widgets: WidgetRegistry, bot_names: tuple[str, 
             notes.append(note)
     footer = _footer(outcome.records)
     body = "\n\n".join(part for part in parts if part).strip()
+    if not body and not cards and not (react or skip):
+        body = _unreachable(outcome.records)
     return Composed(
         body, tuple(_merge_galleries(cards)), footer, tuple(notes), react, skip, bool(footer)
     )
+
+
+_SERVICES = {
+    "search_web": "la recherche web",
+    "read_web_page": "la page",
+    "read_youtube": "la vidéo",
+    "get_weather": "la météo",
+    "get_football": "les scores",
+    "get_transport": "les horaires",
+    "search_media": "la base de films et séries",
+    "search_game": "Steam",
+    "search_track": "Spotify",
+}
+
+
+def _unreachable(records: tuple[ToolRecord, ...]) -> str:
+    """Tous les outils ont échoué et le modèle n'a rien dit : au moins dire quoi, simplement."""
+    if not records or any(record.result.ok for record in records):
+        return ""
+    names = list(dict.fromkeys(_SERVICES.get(record.name, "un service") for record in records))
+    joined = " ni ".join(names[:2])
+    return f"Je n'ai pas pu joindre {joined} pour l'instant. Réessaie dans un instant."
 
 
 def _merge_galleries(cards: list[Card]) -> list[Card]:
