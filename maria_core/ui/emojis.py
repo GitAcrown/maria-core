@@ -76,7 +76,6 @@ SLOT_ICONS = {
     "city": "🏠",
     "team": "⚽",
     "stop": "🚇",
-    "birthday": "🎂",
     "length": "📏",
     "tone": "🗣️",
     "emoji": "😀",
