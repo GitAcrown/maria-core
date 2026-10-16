@@ -1,7 +1,6 @@
 """Calculs et conversions exacts : l'outil, le repérage de la demande, l'annonce d'un outil lent."""
 
 import asyncio
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +10,7 @@ from maria_core.capabilities import Capability, CapabilityRegistry, Context, Res
 from maria_core.capabilities.builtin.calculate import calculate_capability
 from maria_core.conversation.calc import needs_calculation
 from maria_core.conversation.progress import progress_label
-from maria_core.discord.waiting import SlowToolNotice
+from maria_core.discord.waiting import SlowNotice
 from maria_core.llm.loop import complete_turn
 from maria_core.llm.schema import openai_tool
 from maria_core.llm.types import Completion, ToolCall
@@ -109,35 +108,31 @@ def test_each_tool_has_a_plain_waiting_sentence() -> None:
     assert progress_label(["inconnu"]) == "Je m'en occupe…"
 
 
-async def test_the_waiting_notice_lasts_the_whole_turn_but_only_with_tools() -> None:
-    events: list[str] = []
+async def test_the_loop_announces_each_batch_of_tools_and_nothing_without_tools() -> None:
+    told: list[list[str]] = []
 
-    @asynccontextmanager
-    async def waiting(names: Any) -> Any:
-        events.append(f"start {list(names)}")
-        yield
-        events.append("stop")
+    async def announce(names: Any) -> None:
+        told.append(list(names))
 
     async def execute(call: ToolCall) -> Result:
-        events.append("tool")
         return Result(ok=True, data={})
 
     tools = [openai_tool(_echo())]
     with_tool = ScriptedClient(
         [
             Completion(text="", tool_calls=(ToolCall("c1", "echo", {}),), model="fake"),
+            Completion(text="", tool_calls=(ToolCall("c2", "echo", {}),), model="fake"),
             Completion(text="voilà", model="fake"),
         ]
     )
     result = await complete_turn(
-        with_tool, [], system="s", tools=tools, execute=execute, waiting=waiting
+        with_tool, [], system="s", tools=tools, execute=execute, announce=announce
     )
-    assert result.text == "voilà"
-    assert events == ["start ['echo']", "tool", "stop"]
-    events.clear()
+    assert result.text == "voilà" and told == [["echo"], ["echo"]]
+    told.clear()
     without = ScriptedClient([Completion(text="direct", model="fake")])
-    await complete_turn(without, [], system="s", tools=tools, execute=execute, waiting=waiting)
-    assert events == []
+    await complete_turn(without, [], system="s", tools=tools, execute=execute, announce=announce)
+    assert told == []
 
 
 def _echo() -> Capability:
@@ -154,36 +149,110 @@ def _echo() -> Capability:
 
 
 class _Sent:
-    def __init__(self) -> None:
+    def __init__(self, content: str) -> None:
+        self.content = content
         self.deleted = False
+
+    async def edit(self, *, content: str) -> None:
+        self.content = content
 
     async def delete(self) -> None:
         self.deleted = True
 
 
 class _Channel:
-    def __init__(self) -> None:
-        self.sent: list[tuple[str, _Sent]] = []
+    def __init__(self, last_message_id: int) -> None:
+        self.last_message_id = last_message_id
+        self.sent: list[_Sent] = []
+        self.references: list[object] = []
 
-    async def send(self, content: str, **_options: Any) -> _Sent:
-        item = _Sent()
-        self.sent.append((content, item))
+    async def send(self, content: str, **options: Any) -> _Sent:
+        item = _Sent(content)
+        self.sent.append(item)
+        self.references.append(options.get("reference"))
         return item
 
 
 class _Message:
-    def __init__(self) -> None:
-        self.channel = _Channel()
+    def __init__(self, last_message_id: int = 1) -> None:
+        self.id = 1
+        self.channel = _Channel(last_message_id)
 
 
 @pytest.mark.parametrize(("work", "expected"), [(0.0, 0), (0.15, 1)])
-async def test_the_notice_only_appears_for_a_slow_tool_and_is_removed_after(
+async def test_the_notice_only_appears_when_the_answer_is_slow_and_is_removed_after(
     work: float, expected: int
 ) -> None:
     message = _Message()
-    async with SlowToolNotice(message, "Je cherche sur le web…", delay=0.05):  # type: ignore[arg-type]
+    async with SlowNotice(message, delay=0.05):  # type: ignore[arg-type]
         await asyncio.sleep(work)
     await asyncio.sleep(0.02)
     assert len(message.channel.sent) == expected
-    for content, sent in message.channel.sent:
-        assert content == "-# Je cherche sur le web…" and sent.deleted
+    for sent in message.channel.sent:
+        assert sent.content == "-# Je prépare la réponse…" and sent.deleted
+
+
+async def test_the_notice_changes_its_sentence_when_a_tool_starts() -> None:
+    message = _Message()
+    async with SlowNotice(message, delay=0.03) as notice:  # type: ignore[arg-type]
+        await notice.say("Je lis la page…")  # avant l'envoi : sert de première phrase
+        await asyncio.sleep(0.08)
+        assert message.channel.sent[0].content == "-# Je lis la page…"
+        await notice.say("Je calcule…")  # après l'envoi : le message est modifié
+        assert message.channel.sent[0].content == "-# Je calcule…"
+    assert message.channel.sent[0].deleted
+
+
+async def test_the_notice_replies_only_when_other_messages_came_after() -> None:
+    last, later = _Message(last_message_id=1), _Message(last_message_id=2)
+    for message in (last, later):
+        async with SlowNotice(message, delay=0.01):  # type: ignore[arg-type]
+            await asyncio.sleep(0.05)
+    assert last.channel.references == [None]
+    assert later.channel.references == [later]
+
+
+class _Recorder:
+    def __init__(self) -> None:
+        self.said: list[str] = []
+        self.entered = 0
+
+    async def __aenter__(self) -> "_Recorder":
+        self.entered += 1
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+    async def say(self, label: str) -> None:
+        self.said.append(label)
+
+
+async def test_the_service_gives_the_notice_the_tool_sentence(tmp_path: Path) -> None:
+    registry = CapabilityRegistry()
+    registry.register(calculate_capability())
+    client = ScriptedClient(
+        [
+            Completion(
+                text="",
+                tool_calls=(ToolCall("c1", "calculate", {"expression": "1+1"}),),
+                model="fake",
+            ),
+            Completion(text="2.", model="fake"),
+        ]
+    )
+    service, database = _open(tmp_path, client, capabilities=registry)
+    notice = _Recorder()
+    await service.handle(_message(mentioned=True, text="1+1"), waiting=lambda: notice)
+    assert notice.entered == 1 and notice.said == ["Je calcule…"]
+    database.close()
+
+
+async def test_no_notice_when_the_answer_may_be_silence(tmp_path: Path) -> None:
+    client = ScriptedClient([Completion(text="[[SILENCE]]", model="fake")])
+    service, database = _open(tmp_path, client)
+    notice = _Recorder()
+    message = _message(mentioned=False, text="Maria", author_is_bot=False)
+    await service.handle(message, waiting=lambda: notice)
+    assert client.seen and notice.entered == 0  # le modèle a bien été appelé
+    database.close()

@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager, nullcontext
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
@@ -23,6 +24,7 @@ from maria_core.conversation.debounce import Debouncer
 from maria_core.conversation.model import Action, AudioRef, Inbound, Policy, Reply, Route
 from maria_core.conversation.policy import load_policy
 from maria_core.conversation.pressure import Pressure
+from maria_core.conversation.progress import progress_label
 from maria_core.conversation.routing import decide
 from maria_core.conversation.turn import TurnInput, TurnRunner
 from maria_core.db import Database
@@ -44,7 +46,15 @@ __all__ = ["UNAVAILABLE_TEXT", "ConversationService", "DraftDesk"]
 logger = logging.getLogger(__name__)
 
 type Thinking = Callable[[], AbstractAsyncContextManager[object]]
-type Waiting = Callable[[str], AbstractAsyncContextManager[object]]
+
+
+class Notice(Protocol):
+    """Ce que l'adaptateur affiche quand la réponse tarde ; `say` change la phrase."""
+
+    async def say(self, label: str) -> None: ...
+
+
+type Waiting = Callable[[], AbstractAsyncContextManager[Notice]]
 
 _MAX_MESSAGES = 80
 _MAX_TOKENS = 10_000
@@ -307,11 +317,15 @@ class ConversationService:
             model=str(getattr(self._client, "model_name", "") or ""),
             extras=extras,
             silence=can_stay_silent(message, route),
-            waiting=waiting,
         )
         lock = self._locks.setdefault(message.channel_id, asyncio.Lock())
         async with lock, self._turns, (thinking or nullcontext)():
-            outcome = await self._runner.run(data)
+            # Pas d'annonce quand MARIA peut se taire : on l'afficherait pour rien.
+            show = waiting() if waiting is not None and not data.silence else nullcontext()
+            async with show as notice:
+                if notice is not None:
+                    data = replace(data, announce=lambda names: notice.say(progress_label(names)))
+                outcome = await self._runner.run(data)
         await asyncio.to_thread(self._log_usage, outcome)
         composed = compose(outcome, self._widgets, message.bot_names)
         if await self._silent(message, composed):

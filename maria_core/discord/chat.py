@@ -14,7 +14,7 @@ from maria_core.discord.layout import build_views, quiet_links
 from maria_core.discord.learned_view import LearnedView
 from maria_core.discord.memory_view import ProposalView
 from maria_core.discord.voice import prepare_voice
-from maria_core.discord.waiting import SlowToolNotice
+from maria_core.discord.waiting import SlowNotice
 from maria_core.objectives.signals import ObjectiveSignal
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ class ChatCog(commands.Cog):
         reply = await self.app.conversation.handle(
             inbound,
             thinking=message.channel.typing,
-            waiting=lambda label: SlowToolNotice(message, label),
+            waiting=lambda: SlowNotice(message),
         )
         if reply is not None:
             await self._publish(message, reply)
