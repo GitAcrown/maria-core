@@ -17,7 +17,7 @@ class Level:
 LEVELS = {
     "off": Level("off", 99.0, 0, 0.0, 0),
     "quiet": Level("quiet", 0.55, 1, 0.0, 0),
-    "normal": Level("normal", 0.35, 3, 18.0, 2),
+    "normal": Level("normal", 0.35, 3, 24.0, 3),
     "chatty": Level("chatty", 0.25, 6, 40.0, 3),
 }
 

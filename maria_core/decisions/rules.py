@@ -157,7 +157,7 @@ def followup_rules(state: Mapping[str, Any]) -> RuleHit | None:
         return None
     if state.get("same_author") is False or elapsed > 120 or depth > 3:
         return RuleHit("ignore", 1.0)
-    if state.get("question") is True and depth == 0:
+    if state.get("question") is True and depth <= 1:
         return RuleHit("respond", 1.0)
     return None
 
