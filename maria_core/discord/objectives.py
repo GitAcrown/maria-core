@@ -34,18 +34,27 @@ class DiscordCourier:
         body = _MENTION.sub("", delivery.text).strip()
         if delivery.quote and trigger is None:
             body = f"{body}\n> {delivery.quote}"
+        who = _recipient(objective)
         if delivery.mention and not dm and (origin is None or trigger is not None):
-            body = f"<@{objective.owner_id}> {body}".strip()
+            body = f"<@{who}> {body}".strip()
         linked = (dm or elsewhere) and delivery.footer_linked
         footer_text = delivery.footer_linked if linked else delivery.footer
+        if who != objective.owner_id:
+            footer_text = f"{footer_text} · demandé par <@{objective.owner_id}>".strip(" ·")
         footer = f"-# {footer_text}" if footer_text else ""
         mentions = discord.AllowedMentions(
-            users=[discord.Object(id=objective.owner_id)],
+            users=[discord.Object(id=who)],
             roles=False,
             everyone=False,
             replied_user=delivery.mention and trigger is None,
         )
-        sent = await _post(destination, body, footer, delivery, origin, mentions)
+        try:
+            sent = await _post(destination, body, footer, delivery, origin, mentions)
+        except discord.HTTPException:
+            if who == objective.owner_id:
+                raise
+            await self.notify(objective, _unreachable(objective))
+            return
         app = getattr(self._bot, "app", None)
         if isinstance(app, App) and sent is not None and not dm:
             app.conversation.note_posted(sent.channel.id, delivery.text)
@@ -71,9 +80,21 @@ class DiscordCourier:
                     found = None
             if isinstance(found, discord.abc.Messageable):
                 return found
-        return self._bot.get_user(objective.owner_id) or await self._bot.fetch_user(
-            objective.owner_id
+        return self._bot.get_user(_recipient(objective)) or await self._bot.fetch_user(
+            _recipient(objective)
         )
+
+
+def _recipient(objective: Objective) -> int:
+    return objective.target_id or objective.owner_id
+
+
+def _unreachable(objective: Objective) -> str:
+    name = str(objective.state.get("target_name") or "Cette personne")
+    return (
+        f"Je n'ai pas pu prévenir {name} : ses messages privés sont fermés ou le message est "
+        f"refusé. Rappel n°{objective.id} : {objective.title}"
+    )
 
 
 async def _origin(

@@ -3,6 +3,8 @@
 from collections.abc import Mapping
 from typing import Any
 
+from maria_core.objectives.model import Objective
+
 _LISTEN = frozenset(
     {"on_topic", "on_mention", "on_post", "on_link", "on_attachment", "on_reaction", "on_reply_to"}
 )
@@ -39,6 +41,24 @@ def kind_label(
     if kind in _RECURRING:
         return "Rappel récurrent" if act in {"remind", "report", ""} else "Tâche programmée"
     return "Tâche"
+
+
+def recipient(objective: Objective, *, mention: bool = False) -> str:
+    """À qui s'adresse le rappel : « toi », ou la personne (son nom, ou sa mention)."""
+    if objective.target_id is None or objective.target_id == objective.owner_id:
+        return "toi"
+    name = str(objective.state.get("target_name") or "")
+    return f"<@{objective.target_id}>" if mention or not name else name
+
+
+def route(objective: Objective, *, mention: bool = False) -> str:
+    """Où il part : dans le salon (lequel) ou en message privé (à qui)."""
+    if objective.deliver == "dm":
+        other = recipient(objective, mention=mention)
+        return "en message privé" if other == "toi" else f"en message privé à {other}"
+    if objective.channel_ids:
+        return f"dans <#{objective.channel_ids[0]}>"
+    return "dans le salon"
 
 
 def op_label(op: str) -> str:

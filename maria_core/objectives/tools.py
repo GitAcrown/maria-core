@@ -12,7 +12,7 @@ from maria_core.objectives.compile import (
     compile_trigger,
     needs_confirmation,
 )
-from maria_core.objectives.labels import condition_text, kind_label, op_label
+from maria_core.objectives.labels import condition_text, kind_label, op_label, recipient, route
 from maria_core.objectives.model import Objective, ObjectiveQuota, StaleObjective
 from maria_core.objectives.schedule import EVENT_TRIGGERS, describe, first_due, next_due
 from maria_core.objectives.schemas import create_schema, update_schema
@@ -65,7 +65,8 @@ def _create(service: Any) -> Callable[[Context, Mapping[str, Any]], Any]:
                 ),
             )
         try:
-            objective, created = _build(service, context, args)
+            target = await _target(service, context, args)
+            objective, created = _build(service, context, args, target)
         except (ObjectiveQuota, ValueError) as exc:
             return Result(ok=False, data={}, error=str(exc))
         data = public(objective)
@@ -75,17 +76,43 @@ def _create(service: Any) -> Callable[[Context, Mapping[str, Any]], Any]:
         elif objective.status == "draft":
             data["hint"] = "Brouillon : explique en une phrase, il part après un oui."
         draft = created and objective.status == "draft"
-        return Result(ok=True, data=data, widget="objective_draft" if draft else None)
+        widget = None if not created else "objective_draft" if draft else "objective_created"
+        return Result(ok=True, data=data, widget=widget)
 
     return run
 
 
-def _build(service: Any, context: Context, args: Mapping[str, Any]) -> tuple[Objective, bool]:
+async def _target(
+    service: Any, context: Context, args: Mapping[str, Any]
+) -> tuple[int, str] | None:
+    """Quelqu'un d'autre que l'auteur : son id et son nom, vérifiés sur le serveur."""
+    raw = str(args.get("for_user_id") or "").strip()
+    if not raw.isdigit() or int(raw) == context.user_id:
+        return None
+    if context.guild_id is None:
+        raise ValueError("Un rappel pour quelqu'un d'autre se crée sur un serveur.")
+    find = getattr(service, "member_name", None)
+    name = await find(context.guild_id, int(raw)) if find is not None else ""
+    if name is None:
+        raise ValueError("Je ne trouve pas ce membre sur ce serveur.")
+    return int(raw), name
+
+
+def _build(
+    service: Any, context: Context, args: Mapping[str, Any], target: tuple[int, str] | None = None
+) -> tuple[Objective, bool]:
     now = service.now()
     trigger = compile_trigger(args, service.types, now=now)
     action = compile_action(args, service.types)
     condition = compile_condition(args, service.types)
     check_plan(trigger, condition, action)
+    if target is not None and (
+        trigger["type"] != "at" or action["type"] != "remind" or condition is not None
+    ):
+        raise ValueError(
+            "Un rappel pour quelqu'un d'autre est un rappel à date ou à heure, au texte fixe : "
+            "ni écoute, ni récurrence, ni condition."
+        )
     deliver = "dm" if context.guild_id is None else str(args.get("deliver") or "channel")
     repeat = bool(trigger.get("repeat"))
     limit = _max_fires(trigger, args, repeat)
@@ -103,9 +130,12 @@ def _build(service: Any, context: Context, args: Mapping[str, Any]) -> tuple[Obj
         now=now,
         max_fires=limit,
         cooldown_s=_REPEAT_COOLDOWN if repeat and trigger["type"] in EVENT_TRIGGERS else 0,
-        status="draft" if needs_confirmation(trigger, action, limit) else "active",
+        status="draft"
+        if needs_confirmation(trigger, action, limit, other=bool(target))
+        else "active",
         origin_message_id=context.message_id,
-        state={"spec": _spec(args)},
+        state={"spec": _spec(args), **({"target_name": target[1]} if target else {})},
+        target_id=target[0] if target else None,
     )
 
 
@@ -280,6 +310,8 @@ def public(objective: Objective) -> dict[str, Any]:
         "fires": objective.fires,
         "max_fires": objective.max_fires,
         "deliver": objective.deliver,
+        "for": recipient(objective),
+        "where": route(objective),
     }
 
 

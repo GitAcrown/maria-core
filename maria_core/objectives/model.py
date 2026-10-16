@@ -33,6 +33,7 @@ class Objective:
     version: int
     last_error: str
     origin_message_id: int | None = None
+    target_id: int | None = None  # à qui il s'adresse ; None : à son auteur
 
     def __post_init__(self) -> None:
         if self.status not in _STATUSES:
