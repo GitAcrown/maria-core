@@ -254,7 +254,8 @@ class ConversationService:
             return True
         tired = route.reason in _NAMED and self._social.prefers_emoji(message)
         if (route.reason == "followup" and is_media_only(message)) or tired:
-            await self._social.react_now(message, message.message_id)
+            if not self._too_many(message, route.reason == "followup"):
+                await self._social.react_now(message, message.message_id)
             return True
         if self._answers_automatic(message) and is_media_only(message):
             # Un média en réponse à un rappel : rien à lui répondre, un emoji suffit.
@@ -337,20 +338,26 @@ class ConversationService:
             outcome = await self._runner.run(data)
         await asyncio.to_thread(self._log_usage, outcome)
         composed = compose(outcome, self._widgets, message.bot_names)
-        if await self._silent(message, composed):
+        if await self._silent(message, composed, followup=route.reason == "followup"):
             return None
         ask = await self._ask(message, outcome)
         return self._reply(
             message, outcome, composed, history, ask, explicit=route.reason != "followup"
         )
 
-    async def _silent(self, message: Inbound, composed: Composed) -> bool:
+    async def _silent(
+        self, message: Inbound, composed: Composed, *, followup: bool = False
+    ) -> bool:
         if composed.text or composed.cards or not (composed.react or composed.skip):
             return False
         logger.info("Silence choisi dans %s", message.channel_id)
-        if composed.react and self._social is not None:
+        if composed.react and self._social is not None and not self._too_many(message, followup):
             await self._social.react_now(message, message.message_id)
         return True
+
+    def _too_many(self, message: Inbound, followup: bool) -> bool:
+        """Un suivi ne reçoit pas un emoji de plus quand MARIA vient d'en poser un."""
+        return followup and self._social is not None and self._social.recently_reacted(message)
 
     async def _extras(self, message: Inbound) -> list[str]:
         found: list[str] = []

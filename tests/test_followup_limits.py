@@ -49,6 +49,7 @@ async def test_a_followup_turn_asks_for_a_short_answer_and_a_direct_call_does_no
     await service.handle(_message(mentioned=False, text="et pour demain ?", message_id=20))
     system = " ".join(str(m["content"]) for m in client.seen[0] if m["role"] == "system")
     assert "SUIVI :" in system and "Reste bref" in system and "[[REACT]]" in system
+    assert "sans emoji dans ton texte" in system and "SILENCE :" not in system
     await service.handle(_message(mentioned=True, text="Maria bonjour", message_id=21))
     direct = " ".join(str(m["content"]) for m in client.seen[1] if m["role"] == "system")
     assert "SUIVI :" not in direct
@@ -84,4 +85,37 @@ async def test_a_pause_closes_the_listening_and_typing_reopens_it(tmp_path: Path
     social.typing(3, 7)  # elle se remet à écrire
     clock[0] = _NOW + timedelta(seconds=55)
     assert await social.wants_followup(_social_message(text="et donc")) == "respond"
+    database.close()
+
+
+async def test_a_followup_reaction_is_refused_right_after_another_one(tmp_path: Path) -> None:
+    engine = _Engine({"followup": "react"})
+    clock = [_NOW]
+    social, database = _social(tmp_path, engine, clock)
+    social.note_reply(_social_message(), "voilà", explicit=True)
+    clock[0] += timedelta(seconds=5)
+    assert await social.wants_followup(_social_message(text="merci")) == "react"
+    social.room.mark_react(3)  # MARIA vient de poser un emoji
+    clock[0] += timedelta(seconds=10)
+    assert await social.wants_followup(_social_message(text="merci")) == "ignore"
+    clock[0] += timedelta(seconds=100)  # le délai est passé : une nouvelle réaction est permise
+    social.note_reply(_social_message(), "ok", explicit=True)
+    clock[0] += timedelta(seconds=5)
+    assert await social.wants_followup(_social_message(text="merci")) == "react"
+    database.close()
+
+
+async def test_the_model_reaction_on_a_followup_is_dropped_when_one_just_happened(
+    tmp_path: Path,
+) -> None:
+    client = ScriptedClient(
+        [Completion(text="[[REACT]]", model="fake"), Completion(text="[[REACT]]", model="fake")]
+    )
+    service, social, database = _service(tmp_path, client)
+    social.followup = "respond"
+    await service.handle(_message(mentioned=False, text="merci", message_id=30))
+    assert social.reacted == [30]
+    social.recent = True
+    await service.handle(_message(mentioned=False, text="top", message_id=31))
+    assert social.reacted == [30]  # pas d'emoji de plus : MARIA vient d'en poser un
     database.close()
