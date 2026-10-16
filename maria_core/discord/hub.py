@@ -130,13 +130,11 @@ class Action(discord.ui.Button):
 
 
 class Tab(discord.ui.Button):
-    """Un onglet : l'actif est en bleu, les autres en gris, avec un emoji comme dans CRIT."""
+    """Un onglet : l'actif est en bleu, les autres en gris. Jamais d'icône dans un bouton."""
 
-    def __init__(self, label: str, run: Run, *, active: bool, emoji: str = "") -> None:
-        mark = emojis(emoji) if emoji else ""
+    def __init__(self, label: str, run: Run, *, active: bool) -> None:
         super().__init__(
-            label=label or None,
-            emoji=discord.PartialEmoji.from_str(mark) if mark else None,
+            label=label,
             style=discord.ButtonStyle.primary if active else discord.ButtonStyle.secondary,
         )
         self.run = run
