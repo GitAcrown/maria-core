@@ -44,7 +44,7 @@ class MeHub(Hub):
         super().place([*tab_bar(tabs), *items])
 
     def _specs(self) -> list[tuple[str, str, str]]:
-        return [(_PROFILE, "Profil", "👤"), *self.memory.tab_specs()]
+        return [(_PROFILE, "Profil", ""), *self.memory.tab_specs()]
 
     def _go(self, key: str) -> Run:
         async def run(interaction: discord.Interaction) -> None:

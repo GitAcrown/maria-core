@@ -27,7 +27,6 @@ from maria_core.discord.hub import (
 from maria_core.memory.model import Memory, Proposal
 from maria_core.memory.policy import Actor
 from maria_core.memory.store import MemoryDenied
-from maria_core.ui.emojis import SMALL_BRAIN
 
 PAGE = 15
 _RED = discord.ButtonStyle.danger
@@ -222,11 +221,11 @@ class MemoryHub(Hub):
 
     def tab_specs(self) -> list[tuple[str, str, str]]:
         """Les onglets de mémoire : clé, libellé, emoji. Seuls ceux qui ont du contenu."""
-        specs = [("memories", "Souvenirs", SMALL_BRAIN)]
+        specs = [("memories", "Souvenirs", "")]
         if self.state.recent:
-            specs.append(("recent", f"Appris récemment ({len(self.state.recent)})", "✨"))
+            specs.append(("recent", f"Appris récemment ({len(self.state.recent)})", ""))
         if self.state.proposals:
-            specs.append(("proposals", f"À valider ({len(self.state.proposals)})", "📥"))
+            specs.append(("proposals", f"À valider ({len(self.state.proposals)})", ""))
         return specs
 
     def _tabs(self) -> list[Tab]:
