@@ -162,6 +162,11 @@ def _quote_hint(message: Inbound, has_text: bool) -> str:
             f"Iel cite un message de {quote.author_name} : c'est une CITATION, pas son texte, "
             "ne la lui attribue pas."
         )
-    if not has_text:
+    if not has_text and quote.from_bot_self:
+        hint += (
+            " Son message ne contient qu'un média : commente le média, pas ton message cité, "
+            "qui n'est que le contexte. Si tu ne peux pas le voir, dis-le simplement."
+        )
+    elif not has_text:
         hint += " Son message est vide : la demande porte sur le message cité."
     return hint

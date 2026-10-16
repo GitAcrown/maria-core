@@ -100,6 +100,7 @@ class ConversationService:
         self._limits = (max_messages, max_tokens, max_age)
         self._histories: dict[int, ChannelHistory] = {}
         self._replies: dict[int, tuple[int, ...]] = {}
+        self._automated: dict[int, None] = {}  # rappels et alertes postés sans qu'on lui ait écrit
         self._engine = engine
         self._widgets = widgets or WidgetRegistry()
         self._memory = memory
@@ -212,10 +213,16 @@ class ConversationService:
         while len(self._replies) > _REPLY_MEMORY:
             self._replies.pop(next(iter(self._replies)))
 
-    def note_posted(self, channel_id: int, text: str, *, addressee: str = "") -> None:
+    def note_posted(
+        self, channel_id: int, text: str, *, addressee: str = "", message_id: int | None = None
+    ) -> None:
         """Un message envoyé hors conversation (rappel, transcription) reste dans le fil."""
         if text.strip():
             self._history(channel_id).add(_assistant_entry(text, addressee=addressee))
+        if message_id is not None:
+            self._automated[message_id] = None
+            while len(self._automated) > _REPLY_MEMORY:
+                self._automated.pop(next(iter(self._automated)))
 
     async def _edited(
         self,
@@ -257,7 +264,16 @@ class ConversationService:
         if (route.reason == "followup" and is_media_only(message)) or tired:
             await self._social.react_now(message, message.message_id)
             return True
+        if self._answers_automatic(message) and is_media_only(message):
+            # Un média en réponse à un rappel : rien à lui répondre, un emoji suffit.
+            await self._social.react_now(message, message.message_id)
+            return True
         return False
+
+    def _answers_automatic(self, message: Inbound) -> bool:
+        """Le message répond à un rappel ou une alerte que MARIA a postés d'elle-même."""
+        quote = message.quote
+        return quote is not None and quote.from_bot_self and quote.message_id in self._automated
 
     def _admits(self, message: Inbound, route: Route, policy: Policy) -> bool:
         if self._social is None:
