@@ -2,11 +2,11 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Protocol
 
 from maria_core.attachments import Digester
 from maria_core.capabilities import CapabilityRegistry
@@ -24,7 +24,7 @@ from maria_core.conversation.debounce import Debouncer
 from maria_core.conversation.model import Action, AudioRef, Inbound, Policy, Reply, Route
 from maria_core.conversation.policy import load_policy
 from maria_core.conversation.pressure import Pressure
-from maria_core.conversation.progress import progress_label
+from maria_core.conversation.progress import Waiting, announcer
 from maria_core.conversation.routing import decide
 from maria_core.conversation.turn import TurnInput, TurnRunner
 from maria_core.db import Database
@@ -32,7 +32,7 @@ from maria_core.decisions.engine import Decider
 from maria_core.llm.history import ChannelHistory, HistoryEntry
 from maria_core.llm.loop import LoopResult
 from maria_core.llm.prompt import PromptSections
-from maria_core.llm.types import ChatClient, ToolCall
+from maria_core.llm.types import ChatClient
 from maria_core.memory.model import MemoryAsk
 from maria_core.memory.service import Memories
 from maria_core.memory.text import explicit_fact
@@ -47,14 +47,6 @@ logger = logging.getLogger(__name__)
 
 type Thinking = Callable[[], AbstractAsyncContextManager[object]]
 
-
-class Notice(Protocol):
-    """Ce que l'adaptateur affiche quand la réponse tarde ; `say` change la phrase."""
-
-    async def say(self, label: str) -> None: ...
-
-
-type Waiting = Callable[[], AbstractAsyncContextManager[Notice]]
 
 _MAX_MESSAGES = 80
 _MAX_TOKENS = 10_000
@@ -340,7 +332,7 @@ class ConversationService:
             # Une annonce seulement pour un outil lent, jamais pour le bavardage : elle s'ouvre
             # au premier outil et se ferme avec le tour.
             if waiting is not None and not data.silence:
-                data = replace(data, announce=_announcer(waiting, stack))
+                data = replace(data, announce=announcer(waiting, stack))
             outcome = await self._runner.run(data)
         await asyncio.to_thread(self._log_usage, outcome)
         composed = compose(outcome, self._widgets, message.bot_names)
@@ -492,18 +484,3 @@ def _note_entry(note: str, reply_to: int) -> HistoryEntry:
         reply_to=reply_to,
         note=True,
     )
-
-
-def _announcer(
-    waiting: Waiting, stack: AsyncExitStack
-) -> Callable[[Sequence[ToolCall]], Awaitable[None]]:
-    """Le premier lot d'outils ouvre l'annonce ; chaque suivant change la phrase, sans répéter."""
-    state: dict[str, Any] = {"notice": None, "last": ""}
-
-    async def announce(calls: Sequence[ToolCall]) -> None:
-        state["last"] = label = progress_label(calls, state["last"])
-        if state["notice"] is None:
-            state["notice"] = await stack.enter_async_context(waiting())
-        await state["notice"].say(label)
-
-    return announce
