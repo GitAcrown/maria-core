@@ -176,3 +176,24 @@ def _quote_hint(message: Inbound, has_text: bool) -> str:
     elif not has_text:
         hint += " Son message est vide : la demande porte sur le message cité."
     return hint
+
+
+def assistant_entry(text: str, *, reply_to: int | None = None, addressee: str = "") -> HistoryEntry:
+    return HistoryEntry(
+        role="assistant",
+        content=text,
+        created_at=datetime.now(UTC),
+        name="MARIA",
+        reply_to=reply_to,
+        addressee=addressee,
+    )
+
+
+def note_entry(note: str, reply_to: int) -> HistoryEntry:
+    return HistoryEntry(
+        role="user",
+        content=note,
+        created_at=datetime.now(UTC),
+        reply_to=reply_to,
+        note=True,
+    )
