@@ -18,6 +18,12 @@ SILENCE_GUIDE = (
     "`[[SKIP]]` seul si même une réaction n'a pas de sens. Question ou demande, "
     "même implicite : vraie réponse."
 )
+FOLLOWUP_GUIDE = (
+    "SUIVI : la personne enchaîne sur ta réponse. Reste bref et expéditif : une phrase, deux au "
+    "plus, sans reformuler ni résumer ta réponse précédente, sans relancer par une question. "
+    "S'il n'y a rien d'utile à ajouter (merci, ok, rire, simple réaction), réponds seulement "
+    "`[[REACT]]`."
+)
 _REACT_REQUEST = re.compile(
     r"\br[ée]agi[st]?\b|\br[ée]agir\b|\br[ée]agissez\b"
     r"|\b(?:mets?|ajoute|fais|rajoute)\s+(?:moi\s+)?(?:une?\s+)?(?:petite?\s+)?r[ée]action\b"

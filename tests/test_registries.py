@@ -84,8 +84,8 @@ def test_decision_threshold_stays_between_zero_and_one() -> None:
 def test_a_followup_is_caught_a_little_more_readily() -> None:
     followup = next(item for item in builtin_decisions() if item.name == "followup")
     assert followup.threshold == 0.5
-    assert LEVELS["normal"].followup_s == 24.0 and LEVELS["normal"].followup_depth == 3
-    assert followup_rules({"question": True, "depth": 1, "elapsed_s": 10, "same_author": True})
-    assert followup_rules({"question": True, "depth": 2, "elapsed_s": 10}) is None
+    assert LEVELS["normal"].followup_s == 24.0 and LEVELS["normal"].followup_depth == 0
+    assert followup_rules({"question": True, "depth": 0, "elapsed_s": 10, "same_author": True})
+    assert followup_rules({"question": True, "depth": 1, "elapsed_s": 10}) is None
     hit = followup_rules({"question": True, "depth": 4, "elapsed_s": 10})
     assert hit is not None and hit.value == "ignore"

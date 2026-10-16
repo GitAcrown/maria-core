@@ -84,9 +84,10 @@ class Social:
         if message.guild_id is not None:
             self.room.bump_attention(message.guild_id, message.author_id)
 
-    def note_reply(self, message: Inbound, text: str) -> None:
+    def note_reply(self, message: Inbound, text: str, *, explicit: bool = False) -> None:
+        """`explicit` : on l'appelait directement (mention, reply, prénom), pas un simple suivi."""
         self.room.bump_fatigue(message.channel_id, message.author_id)
-        self.room.open_followup(message.channel_id, message.author_id, text)
+        self.room.open_followup(message.channel_id, message.author_id, text, chain=not explicit)
 
     def prefers_emoji(self, message: Inbound) -> bool:
         """Épuisée, auteur pas chaud, pas une question : un emoji au lieu d'une phrase."""
