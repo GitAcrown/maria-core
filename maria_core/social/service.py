@@ -14,7 +14,7 @@ from maria_core.decisions.engine import Decider
 from maria_core.social.baseline import record, threshold
 from maria_core.social.emojis import Usable, learn, learn_text, shortlist
 from maria_core.social.levels import Level, level_for, room_budget
-from maria_core.social.room import ATTENTION_WARM, FATIGUE_EXHAUSTED, Room
+from maria_core.social.room import ATTENTION_WARM, FATIGUE_EXHAUSTED, FOLLOWUP_MAX_S, Room
 from maria_core.social.score import Parts, parts_from
 from maria_core.social.seen import Seen
 from maria_core.social.store import DAILY_DECISIONS, SocialStore
@@ -26,7 +26,6 @@ type Clock = Callable[[], datetime]
 
 _BANDWAGON_AGE = 6 * 3600.0
 _AMBIENT_COOLDOWN = 45.0
-_TYPING_FACTOR = 2.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,8 +97,8 @@ class Social:
         return self.room.fatigue(message.channel_id, message.author_id) >= FATIGUE_EXHAUSTED
 
     def typing(self, channel_id: int, user_id: int) -> None:
-        if self.room.extend_followup(channel_id, user_id):
-            logger.debug("Suivi %s : la personne écrit, fenêtre allongée", channel_id)
+        if self.room.touch_followup(channel_id, user_id):
+            logger.debug("Suivi %s : la personne écrit, l'écoute continue", channel_id)
 
     async def consider(self, message: Inbound, *, enabled: bool = True) -> str:
         """Réaction ambiante. Chaîne vide si MARIA s'abstient."""
@@ -140,9 +139,9 @@ class Social:
             return "ignore"
         elapsed, follow = window
         tired = self.room.fatigue(message.channel_id, message.author_id) >= FATIGUE_EXHAUSTED / 1.6
-        limit = level.followup_s * (_TYPING_FACTOR if follow.extended else 1.0)
-        limit *= 0.6 if tired else 1.0
-        if elapsed > limit or follow.depth > level.followup_depth:
+        idle = elapsed - (follow.active - follow.opened)  # depuis sa dernière activité
+        limit = level.followup_s * (0.6 if tired else 1.0)
+        if elapsed > FOLLOWUP_MAX_S or idle > limit or follow.depth > level.followup_depth:
             return "ignore"
         state = {
             "text": message.text[:300],
@@ -152,7 +151,10 @@ class Social:
             "same_author": True,
             "question": is_question(message.text),
         }
-        return await self._choice("followup", state)
+        verdict = await self._choice("followup", state)
+        # Tant qu'elle continue d'écrire, même sans s'adresser à MARIA, l'écoute reste ouverte.
+        self.room.touch_followup(message.channel_id, message.author_id)
+        return verdict
 
     async def notice_reaction(self, seen: ReactionSeen) -> None:
         await asyncio.to_thread(

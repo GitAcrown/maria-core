@@ -10,6 +10,7 @@ _FATIGUE_HALF = 480.0
 _REACTION_MEMORY = 2000
 _TEXT_MEMORY = 600
 _CHAIN_GAP = 180.0
+FOLLOWUP_MAX_S = 120.0  # on n'écoute jamais un suivi au-delà de 2 min après la réponse
 ATTENTION_WARM = 0.9
 ATTENTION_HOT = 1.8
 MAX_ATTENTION = 6.0
@@ -24,7 +25,7 @@ class Followup:
     opened: float
     depth: int
     bot_text: str
-    extended: bool = False
+    active: float = 0.0  # la dernière fois que la personne a écrit ou tapé
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,7 +125,7 @@ class Room:
         stamp = self.now()
         chained = chain and previous is not None and stamp - previous.opened <= _CHAIN_GAP
         depth = previous.depth + 1 if chained and previous is not None else 0
-        self._follow[key] = Followup(stamp, depth, bot_text[:400])
+        self._follow[key] = Followup(stamp, depth, bot_text[:400], active=stamp)
         _cap(self._follow, _REACTION_MEMORY)
 
     def followup(self, channel_id: int, author_id: int) -> tuple[float, Followup] | None:
@@ -133,12 +134,12 @@ class Room:
             return None
         return self.now() - found.opened, found
 
-    def extend_followup(self, channel_id: int, author_id: int) -> bool:
-        """La personne tape : la fenêtre s'allonge une fois."""
+    def touch_followup(self, channel_id: int, author_id: int) -> bool:
+        """La personne écrit ou tape : l'écoute repart, dans la limite de `FOLLOWUP_MAX_S`."""
         found = self._follow.get((channel_id, author_id))
-        if found is None or found.extended:
+        if found is None or self.now() - found.opened > FOLLOWUP_MAX_S:
             return False
-        found.extended = True
+        found.active = self.now()
         return True
 
     def add_human_reaction(self, message_id: int, emoji: str, user_id: int) -> int:

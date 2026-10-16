@@ -53,3 +53,35 @@ async def test_a_followup_turn_asks_for_a_short_answer_and_a_direct_call_does_no
     direct = " ".join(str(m["content"]) for m in client.seen[1] if m["role"] == "system")
     assert "SUIVI :" not in direct
     database.close()
+
+
+async def test_she_keeps_listening_while_the_person_keeps_writing_up_to_two_minutes(
+    tmp_path: Path,
+) -> None:
+    engine = _Engine({"followup": "ignore"})  # le suivi n'est jamais retenu : seule l'écoute compte
+    clock = [_NOW]
+    social, database = _social(tmp_path, engine, clock)
+    social.note_reply(_social_message(), "voilà", explicit=True)
+    for second in (20, 40, 60, 80, 100, 115):
+        clock[0] = _NOW + timedelta(seconds=second)
+        await social.wants_followup(_social_message(text="et sinon"))
+    assert social.room.followup(3, 7) is not None
+    engine.answers["followup"] = "respond"
+    clock[0] = _NOW + timedelta(seconds=118)
+    assert await social.wants_followup(_social_message(text="et donc")) == "respond"
+    clock[0] = _NOW + timedelta(seconds=125)  # au-delà de 2 min : fini, même en continuant
+    assert await social.wants_followup(_social_message(text="et donc")) == "ignore"
+    database.close()
+
+
+async def test_a_pause_closes_the_listening_and_typing_reopens_it(tmp_path: Path) -> None:
+    engine = _Engine({"followup": "respond"})
+    clock = [_NOW]
+    social, database = _social(tmp_path, engine, clock)
+    social.note_reply(_social_message(), "voilà", explicit=True)
+    clock[0] = _NOW + timedelta(seconds=40)  # 40 s de silence : trop tard (fenêtre de 24 s)
+    assert await social.wants_followup(_social_message(text="et donc")) == "ignore"
+    social.typing(3, 7)  # elle se remet à écrire
+    clock[0] = _NOW + timedelta(seconds=55)
+    assert await social.wants_followup(_social_message(text="et donc")) == "respond"
+    database.close()
