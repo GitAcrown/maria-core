@@ -71,7 +71,7 @@ class ProfileHub(Hub):
         current = self.found.get(slot.key)
         icon = SLOT_ICONS.get(slot.key, "")
         content: list[discord.ui.Item] = [
-            title(f"{icon} {slot.label}", slot.hint),
+            title(f"{icon} {slot.label}".strip(), slot.hint),
             wide(),
             body(self._value_line(slot, current)),
         ]
@@ -93,7 +93,8 @@ class ProfileHub(Hub):
 
     def _line(self, slot: Slot) -> str:
         icon = SLOT_ICONS.get(slot.key, "")
-        return f"{icon} **{slot.label}** · {self._value_line(slot, self.found.get(slot.key))}"
+        value = self._value_line(slot, self.found.get(slot.key))
+        return f"{icon} **{slot.label}** · {value}".strip()
 
     @staticmethod
     def _value_line(slot: Slot, current: Resolved | None) -> str:
