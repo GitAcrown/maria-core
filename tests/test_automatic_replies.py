@@ -31,6 +31,7 @@ class _Social:
     def __init__(self) -> None:
         self.reacted: list[int] = []
         self.followup = "ignore"
+        self.recent = False
         self.room = SimpleNamespace(from_author=lambda *_a: 0, volume=lambda *_a: 0)
 
     async def note(self, _message: Any) -> None: ...
@@ -41,6 +42,9 @@ class _Social:
 
     def prefers_emoji(self, _message: Any) -> bool:
         return False
+
+    def recently_reacted(self, _message: Any) -> bool:
+        return self.recent
 
     async def wants_followup(self, _message: Any) -> str:
         return self.followup

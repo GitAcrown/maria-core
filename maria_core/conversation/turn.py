@@ -117,10 +117,10 @@ class TurnRunner:
         parts = [self._prompt.render_volatile()]
         parts.append(turn_header(data.message, model=data.model))
         parts.extend(item.strip() for item in data.extras if item and item.strip())
-        if data.silence:
-            parts.append(SILENCE_GUIDE)
         if data.followup:
-            parts.append(FOLLOWUP_GUIDE)
+            parts.append(FOLLOWUP_GUIDE)  # plus sobre que le guide du silence : peu d'emojis
+        elif data.silence:
+            parts.append(SILENCE_GUIDE)
         return "\n\n".join(part for part in parts if part)
 
     async def _once(self, data: TurnInput, choice: ToolChoice) -> LoopResult:

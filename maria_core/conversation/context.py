@@ -20,9 +20,9 @@ SILENCE_GUIDE = (
 )
 FOLLOWUP_GUIDE = (
     "SUIVI : la personne enchaîne sur ta réponse. Reste bref et expéditif : une phrase, deux au "
-    "plus, sans reformuler ni résumer ta réponse précédente, sans relancer par une question. "
-    "S'il n'y a rien d'utile à ajouter (merci, ok, rire, simple réaction), réponds seulement "
-    "`[[REACT]]`."
+    "plus, sans reformuler ni résumer ta réponse précédente, sans relancer par une question, "
+    "sans emoji dans ton texte. Réaction `[[REACT]]` seulement pour un simple merci ou accusé "
+    "de réception qui clôt l'échange ; s'il n'y a rien à ajouter autrement, `[[SKIP]]`."
 )
 _REACT_REQUEST = re.compile(
     r"\br[ée]agi[st]?\b|\br[ée]agir\b|\br[ée]agissez\b"

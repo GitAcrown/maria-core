@@ -209,8 +209,8 @@ def builtin_decisions() -> tuple[Decision, ...]:
             ),
             criteria={
                 "respond": "It answers or questions the bot",
-                "react": "An acknowledgement, a nod would do",
-                "ignore": "New topic, or talking to someone else",
+                "react": "Only a pure thanks or acknowledgement closing the exchange (merci, ok)",
+                "ignore": "New topic, banter, a joke, someone else; when unsure, ignore",
             },
         ),
         _decision(

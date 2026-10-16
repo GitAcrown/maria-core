@@ -21,6 +21,8 @@ from maria_core.social.store import DAILY_DECISIONS, SocialStore
 
 logger = logging.getLogger(__name__)
 
+_FOLLOW_REACT_GAP = 90.0  # pas deux emojis de suivi dans ce délai
+
 type Reactor = Callable[[int, int, str], Awaitable[bool]]
 type Clock = Callable[[], datetime]
 
@@ -88,6 +90,10 @@ class Social:
         self.room.bump_fatigue(message.channel_id, message.author_id)
         self.room.open_followup(message.channel_id, message.author_id, text, chain=not explicit)
 
+    def recently_reacted(self, message: Inbound) -> bool:
+        """MARIA vient de réagir dans ce salon : pas un autre emoji de suivi tout de suite."""
+        return self.room.reacted_recently(message.channel_id, _FOLLOW_REACT_GAP)
+
     def prefers_emoji(self, message: Inbound) -> bool:
         """Épuisée, auteur pas chaud, pas une question : un emoji au lieu d'une phrase."""
         if message.guild_id is None or is_question(message.text):
@@ -152,6 +158,8 @@ class Social:
             "question": is_question(message.text),
         }
         verdict = await self._choice("followup", state)
+        if verdict == "react" and self.recently_reacted(message):
+            verdict = "ignore"  # pas deux emojis de suivi coup sur coup
         # Tant qu'elle continue d'écrire, même sans s'adresser à MARIA, l'écoute reste ouverte.
         self.room.touch_followup(message.channel_id, message.author_id)
         return verdict
