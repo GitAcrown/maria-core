@@ -11,7 +11,8 @@ from maria_core.profile.slots import SLOTS, STYLE
 _TEXT = (
     "Règle un champ du profil de la personne, quand elle le demande ou le dit sans ambiguïté : "
     "« j'habite à Lyon » (city), « mon équipe c'est l'OM » (team), « mon métro c'est République » "
-    "(stop), « réponds-moi plus court » (length), « tutoie-moi, détends-toi » (tone), "
+    "(stop), « mon anniversaire c'est le 22 juillet » (birthday, jour et mois), "
+    "« réponds-moi plus court » (length), « tutoie-moi, détends-toi » (tone), "
     "« mets des emojis » (emoji). value vide : efface le champ. Elle le voit dans /moi."
 )
 
@@ -41,7 +42,8 @@ def profile_capability(profiles: Profiles) -> Capability:
                 "slot": {"type": "string", "enum": [slot.key for slot in SLOTS]},
                 "value": {
                     "type": "string",
-                    "description": "Ville, équipe ou arrêt en clair ; pour le style : "
+                    "description": "Ville, équipe, arrêt ou anniversaire (22 juillet) en clair ; "
+                    "pour le style : "
                     + ", ".join(f"{s.key}={'/'.join(v for v, _ in s.choices)}" for s in STYLE),
                 },
             },
