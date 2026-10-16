@@ -27,6 +27,9 @@ class SlowNotice:
         self.delay = delay
         self._timer: asyncio.Task[None] | None = None
         self._sending: asyncio.Future[discord.Message] | None = None
+        self.sent_id: int | None = (
+            None  # pour que la réponse ne le prenne pas pour un autre message
+        )
 
     async def __aenter__(self) -> "SlowNotice":
         self._timer = asyncio.create_task(self._announce())
@@ -70,4 +73,4 @@ class SlowNotice:
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         )
-        await asyncio.shield(self._sending)
+        self.sent_id = (await asyncio.shield(self._sending)).id

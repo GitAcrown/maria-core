@@ -56,18 +56,25 @@ class ChatCog(commands.Cog):
         if not edited:
             _publish_signal(self.app, inbound, message.jump_url)
             inbound = await prepare_voice(self.app, message, inbound)
+        notices: list[SlowNotice] = []
+
+        def waiting() -> SlowNotice:
+            notices.append(SlowNotice(message))
+            return notices[-1]
+
         reply = await self.app.conversation.handle(
-            inbound,
-            thinking=message.channel.typing,
-            waiting=lambda: SlowNotice(message),
+            inbound, thinking=message.channel.typing, waiting=waiting
         )
         if reply is not None:
-            await self._publish(message, reply)
+            own = {notice.sent_id for notice in notices if notice.sent_id is not None}
+            await self._publish(message, reply, own)
 
-    async def _publish(self, message: discord.Message, reply: Reply) -> None:
+    async def _publish(
+        self, message: discord.Message, reply: Reply, own: set[int] | None = None
+    ) -> None:
         if reply.edit_message_id is not None and await _try_edit(message, reply):
             return
-        anchor = _anchor(message, reply)
+        anchor = reply_anchor(message, reply, own or set())
         extra = _extra_view(reply)
         if reply.cards:
             first, last = await _send_views(message.channel, reply, anchor)
@@ -188,10 +195,14 @@ async def _attach(app: App, proposal_id: int, message_id: int) -> None:
     await asyncio.to_thread(app.memory.store.attach_reply, proposal_id, message_id)
 
 
-def _anchor(message: discord.Message, reply: Reply) -> discord.MessageReference | None:
+def reply_anchor(
+    message: discord.Message, reply: Reply, own: set[int]
+) -> discord.MessageReference | None:
+    """Reply seulement si d'autres ont écrit depuis : la ligne d'attente de MARIA ne compte pas."""
     if not reply.reply or message.guild is None:
         return None
-    if getattr(message.channel, "last_message_id", None) == reply.user_message_id:
+    last = getattr(message.channel, "last_message_id", None)
+    if last == reply.user_message_id or last in own:
         return None
     return discord.MessageReference(
         message_id=reply.user_message_id,

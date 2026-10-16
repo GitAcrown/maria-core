@@ -30,8 +30,8 @@ _DOWN_HINT = (
 
 type ToolExecutor = Callable[[ToolCall], Awaitable[Result]]
 type ParallelSafe = Callable[[str], bool]
-# Appelé avec les noms des outils avant chaque lot : de quoi dire ce qui prend du temps.
-type Announce = Callable[[Sequence[str]], Awaitable[None]]
+# Appelé avec les appels du lot avant son exécution : de quoi dire ce qui prend du temps.
+type Announce = Callable[[Sequence[ToolCall]], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +94,7 @@ async def complete_turn(
             break
         if completion.tool_calls and allow_tools:
             if announce is not None:
-                await announce([call.name for call in completion.tool_calls])
+                await announce(completion.tool_calls)
             await _run_tools(turn, completion, execute, parallel_safe)
             continue
         if turn.text or turn.records or turn.nudged or index + 1 >= max_turns:
