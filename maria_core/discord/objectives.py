@@ -48,7 +48,7 @@ class DiscordCourier:
         sent = await _post(destination, body, footer, delivery, origin, mentions)
         app = getattr(self._bot, "app", None)
         if isinstance(app, App) and sent is not None and not dm:
-            app.conversation.note_posted(sent.channel.id, delivery.text)
+            app.conversation.note_posted(sent.channel.id, delivery.text, message_id=sent.id)
 
     async def notify(self, objective: Objective, text: str) -> None:
         user = self._bot.get_user(objective.owner_id) or await self._bot.fetch_user(
