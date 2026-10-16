@@ -14,13 +14,16 @@ from maria_core.config import Settings
 from maria_core.conversation.compose import UNAVAILABLE_TEXT, Composed, compose
 from maria_core.conversation.context import (
     ContextSource,
+    assistant_entry,
     can_stay_silent,
     is_media_only,
     is_reaction_request,
+    note_entry,
     reaction_target,
     user_entry,
 )
 from maria_core.conversation.debounce import Debouncer
+from maria_core.conversation.edits import is_minor_edit
 from maria_core.conversation.model import Action, AudioRef, Inbound, Policy, Reply, Route
 from maria_core.conversation.policy import load_policy
 from maria_core.conversation.pressure import Pressure
@@ -29,7 +32,7 @@ from maria_core.conversation.routing import decide
 from maria_core.conversation.turn import TurnInput, TurnRunner
 from maria_core.db import Database
 from maria_core.decisions.engine import Decider
-from maria_core.llm.history import ChannelHistory, HistoryEntry
+from maria_core.llm.history import ChannelHistory
 from maria_core.llm.loop import LoopResult
 from maria_core.llm.prompt import PromptSections
 from maria_core.llm.types import ChatClient
@@ -210,7 +213,7 @@ class ConversationService:
     ) -> None:
         """Un message envoyé hors conversation (rappel, transcription) reste dans le fil."""
         if text.strip():
-            self._history(channel_id).add(_assistant_entry(text, addressee=addressee))
+            self._history(channel_id).add(assistant_entry(text, addressee=addressee))
         if message_id is not None:
             self._automated[message_id] = None
             while len(self._automated) > _REPLY_MEMORY:
@@ -227,6 +230,13 @@ class ConversationService:
         if not history.contains(message.message_id):
             return None
         if datetime.now(UTC) - message.created_at > EDIT_WINDOW:
+            return None
+        earlier = history.get(message.message_id)
+        fixed = user_entry(message, addressed=True)
+        answered = message.message_id in self._replies
+        if earlier is not None and answered and is_minor_edit(earlier.content, fixed.content):
+            # Faute corrigée : le fil garde le texte juste, la réponse déjà donnée reste.
+            history.replace(message.message_id, fixed, drop_replies=False)
             return None
         route = await self._resolve(message, policy)
         if route.action is Action.IGNORE:
@@ -424,11 +434,11 @@ class ConversationService:
         if not text and not composed.cards:
             return None
         for note in composed.notes:
-            history.add(_note_entry(note, message.message_id))
+            history.add(note_entry(note, message.message_id))
         if outcome.ok and (text or composed.cards):
             spoken = text or "(vue affichée)"
             history.add(
-                _assistant_entry(spoken, reply_to=message.message_id, addressee=message.author_name)
+                assistant_entry(spoken, reply_to=message.message_id, addressee=message.author_name)
             )
         if self._social is not None:
             self._social.note_reply(message, text, explicit=explicit)
@@ -473,26 +483,3 @@ class ConversationService:
                 1 if outcome.ok else 0,
             ),
         )
-
-
-def _assistant_entry(
-    text: str, *, reply_to: int | None = None, addressee: str = ""
-) -> HistoryEntry:
-    return HistoryEntry(
-        role="assistant",
-        content=text,
-        created_at=datetime.now(UTC),
-        name="MARIA",
-        reply_to=reply_to,
-        addressee=addressee,
-    )
-
-
-def _note_entry(note: str, reply_to: int) -> HistoryEntry:
-    return HistoryEntry(
-        role="user",
-        content=note,
-        created_at=datetime.now(UTC),
-        reply_to=reply_to,
-        note=True,
-    )
