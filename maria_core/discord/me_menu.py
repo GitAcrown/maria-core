@@ -60,7 +60,7 @@ class MeHub(Hub):
 async def open_me(interaction: discord.Interaction, app: App) -> None:
     state, actor = await memory_state(interaction, collective=False)
     user = interaction.user
-    hub = MeHub(MemoryHub(app, state, actor), ProfileHub(app, user.id, user.display_name))
+    hub = MeHub(MemoryHub(app, state, actor), ProfileHub(app, user.id, user.name))
     await interaction.response.defer(ephemeral=True, thinking=True)
     await hub.load()
     await hub.open(interaction)

@@ -80,4 +80,4 @@ def _line(message: discord.Message) -> str:
     if not text:
         return ""
     stamp = message.created_at.astimezone(_PARIS).strftime("%H:%M")
-    return f"[{stamp}] {message.author.display_name} : {text[:600]}"
+    return f"[{stamp}] {message.author.name} : {text[:600]}"

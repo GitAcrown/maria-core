@@ -399,7 +399,7 @@ async def memory_state(
         bool(permissions and permissions.manage_messages),
     )
     guild = interaction.guild
-    name = guild.name if collective and guild is not None else user.display_name
+    name = guild.name if collective and guild is not None else user.name
     state = MemoryState(
         user_id=user.id,
         guild_id=guild.id if guild is not None else None,

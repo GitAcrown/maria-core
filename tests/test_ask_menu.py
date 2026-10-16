@@ -26,6 +26,15 @@ def _buttons(view: discord.ui.LayoutView) -> list[discord.ui.Button]:
     return [item for item in view.walk_children() if isinstance(item, discord.ui.Button)]
 
 
+def _picker(view: discord.ui.LayoutView) -> Any:
+    (picker,) = [item for item in view.walk_children() if isinstance(item, discord.ui.Select)]
+    return picker
+
+
+def _labels(view: discord.ui.LayoutView) -> list[str]:
+    return [item.label for item in _picker(view).options]
+
+
 async def test_the_assistant_gives_one_answer_and_treats_the_message_as_content() -> None:
     client = ScriptedClient([Completion(text="  Trois points.  ", model="fake")])
     assistant = Assistant(client)
@@ -67,15 +76,17 @@ class _Interaction:
 
 
 def _message(content: str = "Bonjour tout le monde") -> Any:
-    return SimpleNamespace(author=SimpleNamespace(display_name="Léa"), content=content, embeds=[])
+    author = SimpleNamespace(name="lea_92", display_name="Léa")
+    return SimpleNamespace(author=author, content=content, embeds=[])
 
 
-async def test_the_menu_offers_three_actions_without_icons() -> None:
+async def test_the_menu_is_a_dropdown_with_three_actions_and_the_username() -> None:
     hub = AskHub(Assistant(ScriptedClient([])), _message(), 7)
     hub.build()
-    buttons = _buttons(hub)
-    assert [button.label for button in buttons] == ["Résumer", "Traduire", "Expliquer"]
-    assert all(button.emoji is None for button in buttons)
+    assert _labels(hub) == ["Résumer", "Traduire", "Expliquer"]
+    assert _buttons(hub) == []
+    assert all(option.emoji is None for option in _picker(hub).options)
+    assert "lea_92" in _texts(hub) and "Léa" not in _texts(hub)
 
 
 async def test_a_click_answers_once_with_a_card_that_has_no_button() -> None:
@@ -83,7 +94,7 @@ async def test_a_click_answers_once_with_a_card_that_has_no_button() -> None:
     hub = AskHub(Assistant(client), _message(), 7)
     hub.build()
     interaction = _Interaction()
-    await _buttons(hub)[1].callback(interaction)  # type: ignore[arg-type]
+    await _picker(hub).run(interaction, "translate")
     loading, result = interaction.views
     assert "Je m'en occupe" in _texts(loading)
     assert "Hello everyone" in _texts(result) and "Traduction" in _texts(result)
@@ -97,7 +108,7 @@ async def test_a_second_request_too_soon_is_refused_without_calling_the_model() 
     hub = AskHub(assistant, _message(), 7)
     hub.build()
     interaction = _Interaction()
-    await _buttons(hub)[0].callback(interaction)  # type: ignore[arg-type]
+    await _picker(hub).run(interaction, "summarize")
     assert "Doucement" in _texts(interaction.views[0]) and len(client.seen) == 1
 
 
@@ -137,7 +148,7 @@ def test_only_moderators_get_the_keep_for_the_server_button() -> None:
     def labels(actor: Any, app: Any) -> list[str]:
         hub = AskHub(Assistant(ScriptedClient([])), _message(), 7, app=app, actor=actor)
         hub.build()
-        return [button.label for button in _buttons(hub)]
+        return _labels(hub)
 
     app = SimpleNamespace()
     assert "Retenir pour le serveur" in labels(Actor(7, False, True), app)
@@ -157,9 +168,8 @@ async def test_a_moderator_keeps_the_message_for_the_server_after_editing_it(tmp
         actor=Actor(7, False, True),
     )
     hub.build()
-    keep = next(button for button in _buttons(hub) if button.label == "Retenir pour le serveur")
     interaction = _Keeper()
-    await keep.callback(interaction)  # type: ignore[arg-type]
+    await _picker(hub).run(interaction, "keep")
     modal = interaction.modal
     assert modal.fact.default == "Le salon jeux ferme à minuit"
     modal.fact._value = "Le salon jeux ferme à 23h"

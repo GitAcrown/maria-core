@@ -93,7 +93,7 @@ class VoiceCog(commands.Cog):
         if inbound is None or inbound.audio is None:
             return
         await _drop_reaction(message, payload)
-        requester = payload.member.display_name if payload.member else ""
+        requester = payload.member.name if payload.member else ""
         transcript = await post_transcript(self.app, message, inbound, detail=requester)
         if transcript:
             self.app.conversation.attach_transcript(inbound, transcript)
