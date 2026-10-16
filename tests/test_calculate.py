@@ -8,6 +8,7 @@ import pytest
 
 from maria_core.capabilities import Capability, CapabilityRegistry, Context, Result, Risk
 from maria_core.capabilities.builtin.calculate import calculate_capability
+from maria_core.conversation import progress
 from maria_core.conversation.calc import needs_calculation
 from maria_core.conversation.progress import progress_label
 from maria_core.discord.waiting import SlowNotice
@@ -102,10 +103,17 @@ async def test_a_calculation_forces_the_tool_with_a_hint(tmp_path: Path) -> None
     other_database.close()
 
 
-def test_each_tool_has_a_plain_waiting_sentence() -> None:
-    assert progress_label(["search_web"]) == "Je cherche sur le web…"
-    assert progress_label(["inconnu", "get_weather"]) == "Je consulte la météo…"
-    assert progress_label(["inconnu"]) == "Je m'en occupe…"
+def test_each_tool_has_several_waiting_sentences_and_never_repeats_the_last() -> None:
+    assert progress_label(["search_web"]) in progress._LABELS["search_web"]
+    assert progress_label(["inconnu", "get_weather"]) in progress._LABELS["get_weather"]
+    assert progress_label(["inconnu"]) in progress._DEFAULT
+    assert all(len(options) >= 3 for options in progress._LABELS.values())
+    last = ""
+    for _ in range(60):  # deux recherches de suite : la phrase change à chaque fois
+        phrase = progress_label(["search_web"], last)
+        assert phrase != last
+        last = phrase
+    assert len({progress_label(["calculate"]) for _ in range(60)}) == 3
 
 
 async def test_the_loop_announces_each_batch_of_tools_and_nothing_without_tools() -> None:
@@ -189,7 +197,7 @@ async def test_the_notice_only_appears_when_the_answer_is_slow_and_is_removed_af
     await asyncio.sleep(0.02)
     assert len(message.channel.sent) == expected
     for sent in message.channel.sent:
-        assert sent.content == "-# Je prépare la réponse…" and sent.deleted
+        assert sent.content.startswith("-# Je ") and sent.deleted
 
 
 async def test_the_notice_changes_its_sentence_when_a_tool_starts() -> None:
@@ -244,7 +252,8 @@ async def test_the_service_gives_the_notice_the_tool_sentence(tmp_path: Path) ->
     service, database = _open(tmp_path, client, capabilities=registry)
     notice = _Recorder()
     await service.handle(_message(mentioned=True, text="1+1"), waiting=lambda: notice)
-    assert notice.entered == 1 and notice.said == ["Je calcule…"]
+    assert notice.entered == 1 and len(notice.said) == 1
+    assert notice.said[0] in progress._LABELS["calculate"]
     database.close()
 
 
@@ -256,3 +265,34 @@ async def test_no_notice_when_the_answer_may_be_silence(tmp_path: Path) -> None:
     await service.handle(message, waiting=lambda: notice)
     assert client.seen and notice.entered == 0  # le modèle a bien été appelé
     database.close()
+
+
+async def test_two_tool_batches_change_the_sentence_and_chat_never_opens_a_notice(
+    tmp_path: Path,
+) -> None:
+    registry = CapabilityRegistry()
+    registry.register(calculate_capability())
+    call = ToolCall("c1", "calculate", {"expression": "1+1"})
+    client = ScriptedClient(
+        [
+            Completion(text="", tool_calls=(call,), model="fake"),
+            Completion(
+                text="",
+                tool_calls=(ToolCall("c2", "calculate", {"expression": "2+2"}),),
+                model="fake",
+            ),
+            Completion(text="4.", model="fake"),
+        ]
+    )
+    service, database = _open(tmp_path, client, capabilities=registry)
+    notice = _Recorder()
+    await service.handle(_message(mentioned=True, text="1+1 puis 2+2"), waiting=lambda: notice)
+    assert notice.entered == 1  # une seule annonce, modifiée d'un lot au suivant
+    assert len(notice.said) == 2 and notice.said[0] != notice.said[1]
+    chat = ScriptedClient([Completion(text="Salut !", model="fake")])
+    other, other_database = _open(tmp_path / "chat", chat)
+    quiet = _Recorder()
+    await other.handle(_message(mentioned=True, text="salut, ça va ?"), waiting=lambda: quiet)
+    assert quiet.entered == 0 and quiet.said == []
+    database.close()
+    other_database.close()
