@@ -42,8 +42,6 @@ class Objectives:
         )
         self.matcher = Matcher(self.store, self.runner)
         self.is_request: Callable[[str], Awaitable[bool]] | None = None
-        # Nom d'un membre du serveur, ou None s'il n'en fait pas partie (branché par Discord).
-        self.member_name: Callable[[int, int], Awaitable[str | None]] | None = None
         self.scheduler = Scheduler(self.store, self.runner, clock=self._clock)
 
     @property

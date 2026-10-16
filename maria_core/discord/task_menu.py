@@ -22,7 +22,7 @@ from maria_core.discord.hub import (
     wide,
 )
 from maria_core.discord.task_edit import EditProgram
-from maria_core.objectives.labels import condition_text, kind_label, recipient, route, status_label
+from maria_core.objectives.labels import condition_text, kind_label, route, status_label
 from maria_core.objectives.model import Objective, ObjectiveQuota, StaleObjective
 from maria_core.objectives.schedule import describe
 from maria_core.objectives.tools import operate
@@ -333,8 +333,6 @@ def _meta(item: Objective) -> str:
         bits.append(f"<t:{int(item.next_run_at.timestamp())}:R>")
     if item.max_fires and item.max_fires > 1:
         bits.append(f"{item.fires}/{item.max_fires}")
-    if item.target_id not in (None, item.owner_id):
-        bits.append(f"pour {recipient(item, mention=True)}")
     if item.deliver == "dm":
         bits.append("MP")
     return " · ".join(bits)
@@ -358,8 +356,7 @@ def objective_facts(item: Objective) -> str:
     if item.next_run_at is not None and item.status == "active":
         stamp = int(item.next_run_at.timestamp())
         lines.append(f"**Prochaine fois** · <t:{stamp}:F> · <t:{stamp}:R>")
-    lines.append(f"**Pour** · {recipient(item, mention=True)}")
-    lines.append(f"**Envoi** · {route(item, mention=True)}")
+    lines.append(f"**Envoi** · {route(item)}")
     foot = [f"#{item.id}"]
     if item.max_fires:
         foot.append(f"{item.fires}/{item.max_fires} alerte(s)")
