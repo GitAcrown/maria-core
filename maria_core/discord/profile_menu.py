@@ -32,6 +32,7 @@ class ProfileHub(Hub):
         self.found: dict[str, Resolved] = {}
 
     async def load(self) -> None:
+        await asyncio.to_thread(self.app.profiles.absorb, self.user_id, force=True)
         self.found = await asyncio.to_thread(self.app.profiles.resolve, self.user_id)
 
     def build(self) -> None:
@@ -99,7 +100,7 @@ class ProfileHub(Hub):
         if current is None:
             return "*pas défini*" if not slot.is_choice else "*par défaut*"
         shown = slot.label_of(current.value)
-        return f"{shown}  -# {_PROVENANCE.get(current.source, '')}"
+        return f"{shown} · *{_PROVENANCE.get(current.source, '')}*"
 
     def _plain(self, slot: Slot) -> str:
         current = self.found.get(slot.key)

@@ -18,7 +18,7 @@ from maria_core.discord.profile_menu import ProfileHub
 from maria_core.llm.loop import LoopResult, ToolRecord
 from maria_core.llm.types import ToolCall
 from maria_core.profile import Profiles
-from maria_core.profile.extract import extract
+from maria_core.profile.extract import extract, extract_memory
 from maria_core.profile.style import verdict
 from maria_core.ui.widgets import WidgetRegistry
 
@@ -185,8 +185,8 @@ async def test_the_profile_menu_shows_values_and_where_they_come_from(tmp_path: 
         item.content for item in hub.walk_children() if isinstance(item, discord.ui.TextDisplay)
     )
     assert "## Profil · Lea" in texts
-    assert "**Ville** · Lyon  -# réglé par toi" in texts
-    assert "**Équipe de foot** · OM  -# appris par MARIA, modifiable" in texts
+    assert "**Ville** · Lyon · *réglé par toi*" in texts
+    assert "**Équipe de foot** · OM · *appris par MARIA, modifiable*" in texts
     assert "**Ton** · *par défaut*" in texts
     assert len(list(hub.walk_children())) <= 40
     hub.selected, hub.screen = "city", "slot"
@@ -199,4 +199,35 @@ async def test_the_profile_menu_shows_values_and_where_they_come_from(tmp_path: 
     hub.build()
     selects = [item for item in hub.walk_children() if isinstance(item, discord.ui.Select)]
     assert selects[0].options[0].label == "Automatique"
+    database.close()
+
+
+def test_a_memory_written_about_the_person_gives_their_city_and_team() -> None:
+    assert extract_memory("Tu habites à Saint-Ouen-l'Aumône et tu es né le 22 juillet 1999.") == {
+        "city": "Saint-Ouen-l'Aumône"
+    }
+    assert extract_memory("Le membre habite à Saint-Ouen-L'Aumône (95) et fête le 22/07.") == {
+        "city": "Saint-Ouen-L'Aumône"
+    }
+    assert extract_memory("Tu supportes l'OM") == {"team": "OM"}
+    # le souvenir parle de quelqu'un d'autre, ou de personne : rien à retenir
+    assert extract_memory("Son pote Enzo habite à Lyon") == {}
+    assert extract_memory("Je suis gay") == {}
+
+
+def test_the_profile_fills_empty_fields_from_memories_without_overriding_the_person(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "maria.db")
+    database.migrate()
+    souvenirs = ["Tu habites à Lyon", "Le membre habite à Paris"]
+    profiles = Profiles(database, clock=lambda: _NOW, memories=lambda _user: souvenirs)
+    assert profiles.value(7, "city") == "Lyon"  # le premier souvenir qui le dit
+    profiles.store.set(7, "team", "OM", _NOW)
+    souvenirs.append("Tu supportes le PSG")
+    assert profiles.value(7, "team") == "OM"  # ce que la personne a réglé prime
+    profiles.store.set(8, "city", "Nice", _NOW)
+    assert profiles.value(8, "city") == "Nice"
+    profiles.absorb(7, force=True)
+    assert profiles.value(7, "city") == "Lyon"
     database.close()

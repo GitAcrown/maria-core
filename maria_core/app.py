@@ -71,7 +71,9 @@ class App:
         self.polls = PollStore(database)
         self.memory = Memories(database, _index(settings), engine=self.engine)
         self.memory_summaries = MemorySummaries(self.llm)
-        self.profiles = Profiles(database)
+        self.profiles = Profiles(
+            database, memories=lambda user: [m.content for m in self.memory.store.list_for(user)]
+        )
         self.social = Social(database, self.engine)
         self.objectives = Objectives(database, fetcher=http_fetcher(self.http), judge=self._judge)
         self.objectives.pipeline.searcher = brave_searcher(self.http, settings.brave_api_key)
