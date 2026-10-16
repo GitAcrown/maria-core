@@ -32,7 +32,7 @@ from maria_core.decisions.engine import Decider
 from maria_core.llm.history import ChannelHistory, HistoryEntry
 from maria_core.llm.loop import LoopResult
 from maria_core.llm.prompt import PromptSections
-from maria_core.llm.types import ChatClient
+from maria_core.llm.types import ChatClient, ToolCall
 from maria_core.memory.model import MemoryAsk
 from maria_core.memory.service import Memories
 from maria_core.memory.text import explicit_fact
@@ -477,12 +477,12 @@ def _note_entry(note: str, reply_to: int) -> HistoryEntry:
 
 def _announcer(
     waiting: Waiting, stack: AsyncExitStack
-) -> Callable[[Sequence[str]], Awaitable[None]]:
+) -> Callable[[Sequence[ToolCall]], Awaitable[None]]:
     """Le premier lot d'outils ouvre l'annonce ; chaque suivant change la phrase, sans répéter."""
     state: dict[str, Any] = {"notice": None, "last": ""}
 
-    async def announce(names: Sequence[str]) -> None:
-        state["last"] = label = progress_label(names, state["last"])
+    async def announce(calls: Sequence[ToolCall]) -> None:
+        state["last"] = label = progress_label(calls, state["last"])
         if state["notice"] is None:
             state["notice"] = await stack.enter_async_context(waiting())
         await state["notice"].say(label)

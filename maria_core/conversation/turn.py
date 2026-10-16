@@ -40,7 +40,7 @@ class TurnInput:
     silence: bool = False
     files: str = ""
     deny: frozenset[str] = field(default_factory=frozenset)
-    announce: Callable[[Sequence[str]], Awaitable[None]] | None = None
+    announce: Callable[[Sequence[ToolCall]], Awaitable[None]] | None = None
 
 
 class TurnRunner:

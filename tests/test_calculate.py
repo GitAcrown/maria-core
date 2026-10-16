@@ -103,24 +103,59 @@ async def test_a_calculation_forces_the_tool_with_a_hint(tmp_path: Path) -> None
     other_database.close()
 
 
+def _call(name: str, **arguments: Any) -> ToolCall:
+    return ToolCall("c", name, arguments)
+
+
 def test_each_tool_has_several_waiting_sentences_and_never_repeats_the_last() -> None:
-    assert progress_label(["search_web"]) in progress._LABELS["search_web"]
-    assert progress_label(["inconnu", "get_weather"]) in progress._LABELS["get_weather"]
-    assert progress_label(["inconnu"]) in progress._DEFAULT
+    assert progress_label([_call("search_web")]) in progress._LABELS["search_web"]
+    assert (
+        progress_label([_call("inconnu"), _call("get_weather")])
+        in (progress._LABELS["get_weather"])
+    )
+    assert progress_label([_call("inconnu")]) in progress._DEFAULT
     assert all(len(options) >= 3 for options in progress._LABELS.values())
+    assert all(len(templates) >= 3 for _keys, templates in progress._DETAILED.values())
     last = ""
     for _ in range(60):  # deux recherches de suite : la phrase change à chaque fois
-        phrase = progress_label(["search_web"], last)
+        phrase = progress_label([_call("search_web", query="météo")], last)
         assert phrase != last
         last = phrase
-    assert len({progress_label(["calculate"]) for _ in range(60)}) == 3
+    assert len({progress_label([_call("calculate")]) for _ in range(60)}) == 3
+
+
+def test_the_waiting_sentence_names_the_search_the_site_or_the_city() -> None:
+    def seen(call: ToolCall) -> set[str]:
+        return {progress_label([call]) for _ in range(80)}
+
+    search = seen(_call("search_web", query="extrait de naissance en ligne"))
+    assert "Je cherche « extrait de naissance en ligne »…" in search
+    assert all("extrait de naissance en ligne" in phrase for phrase in search)
+    url = "https://www.service-public.fr/particuliers/vosdroits"
+    assert seen(_call("read_web_page", url=url)) == {
+        "Je lis service-public.fr…",
+        "J'ouvre service-public.fr…",
+        "Lecture de service-public.fr…",
+    }
+    assert all("Lyon" in phrase for phrase in seen(_call("get_weather", city="Lyon")))
+    # plusieurs appels, ou rien à citer : la phrase générale
+    two = [_call("search_web", query="a"), _call("search_web", query="b")]
+    assert progress_label(two) in progress._LABELS["search_web"]
+    assert progress_label([_call("search_web", query="  ")]) in progress._LABELS["search_web"]
+
+
+def test_what_is_quoted_is_cleaned_and_short() -> None:
+    query = "**gras** [lien](http://x) @everyone `code` ligne " + "mot " * 30
+    phrase = progress_label([_call("search_web", query=query)])
+    assert not any(char in phrase for char in "*[]()@`")
+    assert len(phrase) < 90 and "…" in phrase
 
 
 async def test_the_loop_announces_each_batch_of_tools_and_nothing_without_tools() -> None:
     told: list[list[str]] = []
 
-    async def announce(names: Any) -> None:
-        told.append(list(names))
+    async def announce(calls: Any) -> None:
+        told.append([call.name for call in calls])
 
     async def execute(call: ToolCall) -> Result:
         return Result(ok=True, data={})
@@ -158,6 +193,7 @@ def _echo() -> Capability:
 
 class _Sent:
     def __init__(self, content: str) -> None:
+        self.id = 900
         self.content = content
         self.deleted = False
 
