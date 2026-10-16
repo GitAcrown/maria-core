@@ -2,7 +2,9 @@
 
 import random
 import re
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 from maria_core.llm.types import ToolCall
@@ -209,3 +211,27 @@ def _short(text: str) -> str:
     if len(plain) <= _DETAIL_CHARS:
         return plain
     return plain[: _DETAIL_CHARS - 1].rstrip() + "…"
+
+
+class Notice(Protocol):
+    """Ce que l'adaptateur affiche quand un outil tarde ; `say` change la phrase."""
+
+    async def say(self, label: str) -> None: ...
+
+
+type Waiting = Callable[[], AbstractAsyncContextManager[Notice]]
+
+
+def announcer(
+    waiting: Waiting, stack: AsyncExitStack
+) -> Callable[[Sequence[ToolCall]], Awaitable[None]]:
+    """Le premier lot d'outils ouvre l'annonce ; chaque suivant change la phrase, sans répéter."""
+    state: dict[str, Any] = {"notice": None, "last": ""}
+
+    async def announce(calls: Sequence[ToolCall]) -> None:
+        state["last"] = label = progress_label(calls, state["last"])
+        if state["notice"] is None:
+            state["notice"] = await stack.enter_async_context(waiting())
+        await state["notice"].say(label)
+
+    return announce
