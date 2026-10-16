@@ -2,7 +2,8 @@
 
 from collections.abc import Sequence
 
-DELAY_S = 3.0
+DELAY_S = 2.0
+THINKING = "Je prépare la réponse…"
 _DEFAULT = "Je m'en occupe…"
 _LABELS = {
     "search_web": "Je cherche sur le web…",

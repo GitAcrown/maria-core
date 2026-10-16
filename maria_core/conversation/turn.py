@@ -1,8 +1,7 @@
 """Un tour avec le modèle : prompt, outils, garde-fous, nouvel essai sans image."""
 
 import logging
-from collections.abc import Callable, Sequence
-from contextlib import AbstractAsyncContextManager
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, replace
 
 from maria_core.capabilities import CapabilityRegistry, Context, Result, Risk
@@ -12,7 +11,6 @@ from maria_core.conversation.calc import HINT as CALC_HINT
 from maria_core.conversation.calc import needs_calculation
 from maria_core.conversation.context import SILENCE_GUIDE, focus_note, turn_header
 from maria_core.conversation.model import Inbound, Policy
-from maria_core.conversation.progress import progress_label
 from maria_core.db import Database
 from maria_core.decisions.engine import Decider
 from maria_core.llm.history import ChannelHistory
@@ -42,7 +40,7 @@ class TurnInput:
     silence: bool = False
     files: str = ""
     deny: frozenset[str] = field(default_factory=frozenset)
-    waiting: Callable[[str], AbstractAsyncContextManager[object]] | None = None
+    announce: Callable[[Sequence[str]], Awaitable[None]] | None = None
 
 
 class TurnRunner:
@@ -152,7 +150,7 @@ class TurnRunner:
             execute=execute,
             first_choice=choice if tools else "auto",
             parallel_safe=self._parallel_safe,
-            waiting=(lambda names: data.waiting(progress_label(names))) if data.waiting else None,
+            announce=data.announce,
         )
 
     def _parallel_safe(self, name: str) -> bool:
