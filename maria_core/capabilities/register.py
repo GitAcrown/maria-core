@@ -5,6 +5,7 @@ from typing import Protocol
 
 from maria_core.capabilities import CapabilityRegistry
 from maria_core.capabilities.builtin.about import about_capability
+from maria_core.capabilities.builtin.calculate import calculate_capability
 from maria_core.capabilities.builtin.layout import (
     layout_capabilities,
     render_draft,
@@ -59,6 +60,7 @@ def register_builtins(app: BuiltinHost, condense: Condense | None = None) -> Non
     for capability in web_capabilities(app.http, app.settings.brave_api_key):
         app.capabilities.register(capability)
     app.capabilities.register(about_capability(app.capabilities))
+    app.capabilities.register(calculate_capability())
     app.capabilities.register(
         summary_capability(
             app.conversation.transcript,
