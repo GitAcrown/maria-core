@@ -30,16 +30,23 @@ def _quote(identifier: int = 77) -> Quote:
 class _Social:
     def __init__(self) -> None:
         self.reacted: list[int] = []
+        self.followup = "ignore"
         self.room = SimpleNamespace(from_author=lambda *_a: 0, volume=lambda *_a: 0)
 
     async def note(self, _message: Any) -> None: ...
 
     def note_addressed(self, _message: Any) -> None: ...
 
-    def note_reply(self, _message: Any, _text: str) -> None: ...
+    def note_reply(self, _message: Any, _text: str, **_options: Any) -> None: ...
 
     def prefers_emoji(self, _message: Any) -> bool:
         return False
+
+    async def wants_followup(self, _message: Any) -> str:
+        return self.followup
+
+    async def consider(self, _message: Any, **_options: Any) -> str:
+        return ""
 
     async def react_now(self, message: Any, _target: int, **_options: Any) -> None:
         self.reacted.append(message.message_id)

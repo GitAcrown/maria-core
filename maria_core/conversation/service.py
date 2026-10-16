@@ -326,6 +326,7 @@ class ConversationService:
             model=str(getattr(self._client, "model_name", "") or ""),
             extras=extras,
             silence=can_stay_silent(message, route),
+            followup=route.reason == "followup",
         )
         lock = self._locks.setdefault(message.channel_id, asyncio.Lock())
         async with lock, self._turns, (thinking or nullcontext)(), AsyncExitStack() as stack:
@@ -339,7 +340,9 @@ class ConversationService:
         if await self._silent(message, composed):
             return None
         ask = await self._ask(message, outcome)
-        return self._reply(message, outcome, composed, history, ask)
+        return self._reply(
+            message, outcome, composed, history, ask, explicit=route.reason != "followup"
+        )
 
     async def _silent(self, message: Inbound, composed: Composed) -> bool:
         if composed.text or composed.cards or not (composed.react or composed.skip):
@@ -404,6 +407,8 @@ class ConversationService:
         composed: Composed,
         history: ChannelHistory,
         ask: MemoryAsk | None,
+        *,
+        explicit: bool = True,
     ) -> Reply | None:
         text = composed.text
         traced = ask is not None and ask.learned_id is not None
@@ -419,7 +424,7 @@ class ConversationService:
                 _assistant_entry(spoken, reply_to=message.message_id, addressee=message.author_name)
             )
         if self._social is not None:
-            self._social.note_reply(message, text)
+            self._social.note_reply(message, text, explicit=explicit)
         known = self._replies.get(message.message_id, ()) if message.edited else ()
         edit_id = known[0] if len(known) == 1 else None
         return Reply(

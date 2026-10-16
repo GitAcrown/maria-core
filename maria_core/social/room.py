@@ -112,12 +112,17 @@ class Room:
         stamp = self._last_react.get(channel_id)
         return stamp is not None and self.now() - stamp <= within
 
-    def open_followup(self, channel_id: int, author_id: int, bot_text: str) -> None:
-        """Une chaîne se poursuit si la réponse précédente est récente, sinon elle repart à 0."""
+    def open_followup(
+        self, channel_id: int, author_id: int, bot_text: str, *, chain: bool = True
+    ) -> None:
+        """Une chaîne se poursuit si la réponse précédente est récente, sinon elle repart à 0.
+
+        `chain` faux : la personne vient de l'appeler elle-même, la chaîne repart à 0.
+        """
         key = (channel_id, author_id)
         previous = self._follow.get(key)
         stamp = self.now()
-        chained = previous is not None and stamp - previous.opened <= _CHAIN_GAP
+        chained = chain and previous is not None and stamp - previous.opened <= _CHAIN_GAP
         depth = previous.depth + 1 if chained and previous is not None else 0
         self._follow[key] = Followup(stamp, depth, bot_text[:400])
         _cap(self._follow, _REACTION_MEMORY)

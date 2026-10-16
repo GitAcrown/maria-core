@@ -9,7 +9,12 @@ from maria_core.capabilities.runner import SlotSource, available, invoke
 from maria_core.config import Settings
 from maria_core.conversation.calc import HINT as CALC_HINT
 from maria_core.conversation.calc import needs_calculation
-from maria_core.conversation.context import SILENCE_GUIDE, focus_note, turn_header
+from maria_core.conversation.context import (
+    FOLLOWUP_GUIDE,
+    SILENCE_GUIDE,
+    focus_note,
+    turn_header,
+)
 from maria_core.conversation.model import Inbound, Policy
 from maria_core.db import Database
 from maria_core.decisions.engine import Decider
@@ -38,6 +43,7 @@ class TurnInput:
     model: str
     extras: Sequence[str] = ()
     silence: bool = False
+    followup: bool = False
     files: str = ""
     deny: frozenset[str] = field(default_factory=frozenset)
     announce: Callable[[Sequence[ToolCall]], Awaitable[None]] | None = None
@@ -113,6 +119,8 @@ class TurnRunner:
         parts.extend(item.strip() for item in data.extras if item and item.strip())
         if data.silence:
             parts.append(SILENCE_GUIDE)
+        if data.followup:
+            parts.append(FOLLOWUP_GUIDE)
         return "\n\n".join(part for part in parts if part)
 
     async def _once(self, data: TurnInput, choice: ToolChoice) -> LoopResult:
