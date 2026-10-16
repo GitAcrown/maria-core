@@ -70,6 +70,8 @@ class ProfileStore:
         text = " ".join(str(value).split())[:60]
         if not text:
             raise ValueError("Valeur vide.")
+        if slot.normalize is not None:
+            return slot.normalize(text)
         if slot.is_choice and text not in dict(slot.choices):
             allowed = ", ".join(dict(slot.choices))
             raise ValueError(f"Valeur possible pour {slot.label} : {allowed}.")

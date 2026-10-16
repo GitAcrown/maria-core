@@ -1,6 +1,9 @@
 """Les champs du profil. Chacun est visible et modifiable dans /moi (onglet Profil)."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
+
+from maria_core.profile.birthday import normalize, show
 
 
 @dataclass(frozen=True, slots=True)
@@ -9,18 +12,29 @@ class Slot:
     label: str
     hint: str
     choices: tuple[tuple[str, str], ...] = ()
+    normalize: Callable[[str], str] | None = None
+    show: Callable[[str], str] | None = None
 
     @property
     def is_choice(self) -> bool:
         return bool(self.choices)
 
     def label_of(self, value: str) -> str:
+        if self.show is not None:
+            return self.show(value)
         return dict(self.choices).get(value, value)
 
 
 CITY = Slot("city", "Ville", "Météo, « chez moi », « ici »")
 TEAM = Slot("team", "Équipe de foot", "« Mon équipe », « le match d'hier »")
 STOP = Slot("stop", "Arrêt ou gare habituel", "« Mon métro », « mon train »")
+BIRTHDAY = Slot(
+    "birthday",
+    "Anniversaire",
+    "Jour et mois, par exemple 22 juillet",
+    normalize=normalize,
+    show=show,
+)
 LENGTH = Slot(
     "length",
     "Longueur des réponses",
@@ -40,7 +54,7 @@ EMOJI = Slot(
     (("none", "Aucun"), ("some", "Quelques-uns"), ("many", "Volontiers")),
 )
 
-FACTS = (CITY, TEAM, STOP)
+FACTS = (CITY, TEAM, STOP, BIRTHDAY)
 STYLE = (LENGTH, TONE, EMOJI)
 SLOTS = (*FACTS, *STYLE)
 BY_KEY = {slot.key: slot for slot in SLOTS}

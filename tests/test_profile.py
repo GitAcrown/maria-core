@@ -18,6 +18,7 @@ from maria_core.discord.profile_menu import ProfileHub
 from maria_core.llm.loop import LoopResult, ToolRecord
 from maria_core.llm.types import ToolCall
 from maria_core.profile import Profiles
+from maria_core.profile.birthday import normalize, show
 from maria_core.profile.extract import extract, extract_memory
 from maria_core.profile.style import verdict
 from maria_core.ui.widgets import WidgetRegistry
@@ -204,7 +205,8 @@ async def test_the_profile_menu_shows_values_and_where_they_come_from(tmp_path: 
 
 def test_a_memory_written_about_the_person_gives_their_city_and_team() -> None:
     assert extract_memory("Tu habites à Saint-Ouen-l'Aumône et tu es né le 22 juillet 1999.") == {
-        "city": "Saint-Ouen-l'Aumône"
+        "city": "Saint-Ouen-l'Aumône",
+        "birthday": "22/07",
     }
     assert extract_memory("Le membre habite à Saint-Ouen-L'Aumône (95) et fête le 22/07.") == {
         "city": "Saint-Ouen-L'Aumône"
@@ -230,4 +232,60 @@ def test_the_profile_fills_empty_fields_from_memories_without_overriding_the_per
     assert profiles.value(8, "city") == "Nice"
     profiles.absorb(7, force=True)
     assert profiles.value(7, "city") == "Lyon"
+    database.close()
+
+
+def test_a_birthday_is_kept_as_day_and_month_and_shown_in_words() -> None:
+    assert normalize("22 juillet 1999") == "22/07"
+    assert normalize("1er mai") == "01/05"
+    assert normalize("3/4") == "03/04"
+    assert normalize("22.07.99") == "22/07"
+    assert normalize("29 février") == "29/02"
+    assert show("22/07") == "22 juillet" and show("01/05") == "1er mai"
+    for wrong in ("31/02", "13/13", "demain", "22 juilet", "0/5"):
+        with pytest.raises(ValueError, match=r"anniversaire|date"):
+            normalize(wrong)
+
+
+def test_the_birthday_is_understood_when_said_clearly() -> None:
+    assert extract("mon anniversaire c'est le 22 juillet") == {"birthday": "22/07"}
+    assert extract("Je suis né le 1er mai 1999") == {"birthday": "01/05"}
+    assert extract("mon anniv est le 3/4") == {"birthday": "03/04"}
+    assert extract("l'anniversaire de Léa est le 5 mars") == {}
+    assert extract("je suis née le 31/02") == {}
+
+
+def test_the_birthday_is_read_from_memories_about_the_person_only() -> None:
+    assert extract_memory("Tu es né le 22 juillet 1999") == {"birthday": "22/07"}
+    assert extract_memory("Anniversaire le 22 juillet 1999") == {"birthday": "22/07"}
+    assert extract_memory("Le membre habite à Lyon et son anniversaire est le 22/07.") == {
+        "city": "Lyon",
+        "birthday": "22/07",
+    }
+    assert extract_memory("Son pote Enzo est né le 5 mars") == {}
+    assert extract_memory("Son anniversaire est le 5 mars") == {}
+
+
+def test_the_profile_stores_the_birthday_and_the_prompt_says_it_in_words(tmp_path: Path) -> None:
+    profiles, database = _profiles(tmp_path)
+    assert profiles.store.set(7, "birthday", "22 juillet 1999", _NOW) == "22/07"
+    with pytest.raises(ValueError, match="illisible"):
+        profiles.store.set(7, "birthday", "bientôt", _NOW)
+    message = Inbound(
+        channel_id=1,
+        message_id=1,
+        guild_id=5,
+        author_id=7,
+        author_name="Lea",
+        text="salut",
+        is_dm=False,
+        author_is_bot=False,
+        mentioned=True,
+        reply_to_bot=False,
+        mention_everyone=False,
+        edited=False,
+        author_is_owner=False,
+        author_is_moderator=False,
+    )
+    assert "anniversaire : 22 juillet" in profiles.prompt_for(message)
     database.close()

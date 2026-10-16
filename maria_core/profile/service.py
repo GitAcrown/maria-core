@@ -87,7 +87,7 @@ class Profiles:
             return ""
         found = self.resolve(message.author_id)
         facts = [
-            f"{item.slot.label.lower()} : {item.value}"
+            f"{item.slot.label.lower()} : {item.slot.label_of(item.value)}"
             for item in found.values()
             if item.slot in FACTS
         ]
