@@ -156,7 +156,7 @@ class MemoryHub(Hub):
                 Action("Annuler la modif", self._undo),
                 Action("Oublier", self._forget, style=discord.ButtonStyle.danger),
             ]
-        buttons.append(Action("Retour", self._back))
+        buttons.append(Action("← Retour", self._back))
         self.set_layout(content, discord.ui.ActionRow(*buttons))
 
     def _proposal(self) -> None:
@@ -177,7 +177,7 @@ class MemoryHub(Hub):
             discord.ui.ActionRow(
                 Action("Retenir", self._accept, style=discord.ButtonStyle.success),
                 Action("Ignorer", self._ignore, style=discord.ButtonStyle.danger),
-                Action("Retour", self._back),
+                Action("← Retour", self._back),
             ),
         )
 
@@ -219,17 +219,17 @@ class MemoryHub(Hub):
             return self.state.proposals
         return self.state.recent if self.tab == "recent" else self.state.memories
 
-    def tab_specs(self) -> list[tuple[str, str, str]]:
-        """Les onglets de mémoire : clé, libellé, emoji. Seuls ceux qui ont du contenu."""
-        specs = [("memories", "Souvenirs", "")]
+    def tab_specs(self) -> list[tuple[str, str]]:
+        """Les onglets de mémoire : clé et libellé. Seuls ceux qui ont du contenu."""
+        specs = [("memories", "Souvenirs")]
         if self.state.recent:
-            specs.append(("recent", f"Appris récemment ({len(self.state.recent)})", ""))
+            specs.append(("recent", f"Appris récemment ({len(self.state.recent)})"))
         if self.state.proposals:
-            specs.append(("proposals", f"À valider ({len(self.state.proposals)})", ""))
+            specs.append(("proposals", f"À valider ({len(self.state.proposals)})"))
         return specs
 
     def _tabs(self) -> list[Tab]:
-        return [self._tab(key, label, emoji) for key, label, emoji in self.tab_specs()]
+        return [self._tab(key, label) for key, label in self.tab_specs()]
 
     def _age(self, item: Memory | Proposal) -> str:
         if self.tab != "recent" or not isinstance(item, Memory):
@@ -242,12 +242,12 @@ class MemoryHub(Hub):
     def _may_edit(self) -> bool:
         return not self.state.collective or self.state.can_manage
 
-    def _tab(self, tab: str, label: str, emoji: str) -> Tab:
+    def _tab(self, tab: str, label: str) -> Tab:
         async def run(interaction: discord.Interaction) -> None:
             self.tab, self.page, self.note = tab, 0, ""
             await self.refresh(interaction)
 
-        return Tab(label, run, active=self.tab == tab, emoji=emoji)
+        return Tab(label, run, active=self.tab == tab)
 
     def _turn(self, delta: int) -> Run:
         async def run(interaction: discord.Interaction) -> None:

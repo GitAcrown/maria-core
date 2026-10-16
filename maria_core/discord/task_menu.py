@@ -26,7 +26,7 @@ from maria_core.objectives.labels import condition_text, kind_label, status_labe
 from maria_core.objectives.model import Objective, ObjectiveQuota, StaleObjective
 from maria_core.objectives.schedule import describe
 from maria_core.objectives.tools import operate
-from maria_core.ui.emojis import EVENT_TASK, KIND_ICONS, SMALL_TASK
+from maria_core.ui.emojis import KIND_ICONS
 
 PAGE = 5
 _RANK = {"draft": 0, "active": 1, "paused": 2, "failed": 3}
@@ -35,20 +35,14 @@ _CONFIRM = {
     "skip": ("Passer une fois", "La prochaine occurrence est sautée."),
 }
 _GROUPS = (
-    ("all", "Tout", "🗓️", frozenset()),
+    ("all", "Tout", frozenset()),
     (
         "reminders",
         "Rappels",
-        SMALL_TASK,
         frozenset({"Rappel", "Rappel récurrent", "Tâche programmée", "Tâche"}),
     ),
-    (
-        "listening",
-        "Écoutes",
-        EVENT_TASK,
-        frozenset({"Écoute", "Alerte vocale", "Alerte d'arrivée"}),
-    ),
-    ("watching", "Veilles", "🔎", frozenset({"Surveillance", "Veille de prix"})),
+    ("listening", "Écoutes", frozenset({"Écoute", "Alerte vocale", "Alerte d'arrivée"})),
+    ("watching", "Veilles", frozenset({"Surveillance", "Veille de prix"})),
 )
 _DONE = {
     "pause": "En pause.",
@@ -123,7 +117,7 @@ class TaskHub(Hub):
         self.set_layout(content, *rows, above=tab_bar(self._tabs()))
 
     def _listed(self) -> tuple[Objective, ...]:
-        kinds = next(kinds for key, _label, _icon, kinds in _GROUPS if key == self.group)
+        kinds = next(kinds for key, _label, kinds in _GROUPS if key == self.group)
         if not kinds:
             return self.objectives
         return tuple(item for item in self.objectives if _kind(item) in kinds)
@@ -131,11 +125,11 @@ class TaskHub(Hub):
     def _tabs(self) -> list[Tab]:
         """Tout, puis seulement les familles présentes, avec leur nombre."""
         tabs: list[Tab] = []
-        for key, label, icon, kinds in _GROUPS:
+        for key, label, kinds in _GROUPS:
             count = sum(not kinds or _kind(item) in kinds for item in self.objectives)
             if count or key == "all":
                 run, active = self._group(key), key == self.group
-                tabs.append(Tab(f"{label} ({count})", run, active=active, emoji=icon))
+                tabs.append(Tab(f"{label} ({count})", run, active=active))
         return tabs
 
     def _group(self, key: str) -> Run:
@@ -228,7 +222,7 @@ class TaskHub(Hub):
             if item.next_run_at is not None and item.trigger.get("type") != "at":
                 buttons.append(Action("Passer une fois", self._ask("skip")))
         buttons.append(Action("Supprimer", self._ask("cancel"), style=_RED))
-        buttons.append(Action("Retour", self._back))
+        buttons.append(Action("← Retour", self._back))
         return buttons
 
     def _confirm(self, item: Objective) -> None:

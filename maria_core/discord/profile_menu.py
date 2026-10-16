@@ -77,12 +77,12 @@ class ProfileHub(Hub):
             options = [option(_AUTO, "Automatique", "Selon tes messages")] if slot in STYLE else []
             options += [option(value, label) for value, label in slot.choices]
             rows.append(discord.ui.ActionRow(Picker("Choisir…", options, self._choose)))
-            rows.append(discord.ui.ActionRow(Action("Retour", self._back)))
+            rows.append(discord.ui.ActionRow(Action("← Retour", self._back)))
         else:
             buttons: list[discord.ui.Item] = [Action("Modifier", self._edit, style=_BLUE)]
             if current is not None:
                 buttons.append(Action("Effacer", self._clear, style=_RED))
-            buttons.append(Action("Retour", self._back))
+            buttons.append(Action("← Retour", self._back))
             rows.append(discord.ui.ActionRow(*buttons))
         self.set_layout(content, *rows)
 

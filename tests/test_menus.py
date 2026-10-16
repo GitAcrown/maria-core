@@ -93,7 +93,7 @@ async def test_memory_hub_shows_summary_catalog_and_detail(tmp_path: Path) -> No
     assert {"Ajouter", "→"} <= set(_labels(hub))
     hub.selected, hub.screen = state.memories[0].id, "memory"
     hub.build()
-    assert {"Modifier", "Oublier", "Retour"} <= set(_labels(hub))
+    assert {"Modifier", "Oublier", "← Retour"} <= set(_labels(hub))
     database.close()
 
 
@@ -144,7 +144,7 @@ async def test_task_hub_names_each_kind_and_confirms_deletion() -> None:
     assert "-# Surveillance · en veille" in text
     hub.selected, hub.screen = 2, "detail"
     hub.build()
-    assert _labels(hub) == ["Modifier", "Pause", "Passer une fois", "Supprimer", "Retour"]
+    assert _labels(hub) == ["Modifier", "Pause", "Passer une fois", "Supprimer", "← Retour"]
     hub.screen, hub.pending = "confirm", "cancel"
     hub.build()
     assert "**Supprimer ?**" in _texts(hub)
@@ -167,3 +167,20 @@ async def test_task_hub_tabs_filter_by_family_and_only_show_those_present() -> N
     hub.group = "listening"
     hub.build()
     assert "Tâche 2" in _texts(hub) and "Tâche 1" not in _texts(hub)
+
+
+async def test_no_button_of_the_menus_carries_an_icon() -> None:
+    app: Any = SimpleNamespace()
+    hub = TaskHub(app, 7)
+    hub.objectives = (
+        _objective(1, {"type": "at", "at": "2026-10-14T09:00"}),
+        _objective(2, {"type": "on_topic", "topic": "jeux"}, action={"type": "alert"}),
+    )
+    for screen in ("catalog", "detail", "confirm"):
+        hub.selected, hub.screen, hub.pending = 1, screen, "cancel"
+        hub.build()
+        buttons = [i for i in hub.walk_children() if isinstance(i, discord.ui.Button)]
+        assert buttons and all(button.emoji is None for button in buttons), screen
+    hub.screen = "detail"
+    hub.build()
+    assert "← Retour" in _labels(hub)

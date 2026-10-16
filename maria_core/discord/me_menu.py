@@ -28,7 +28,7 @@ class MeHub(Hub):
         await asyncio.gather(self.memory.load(), self.profile.load())
 
     def build(self) -> None:
-        if self.tab not in {key for key, _label, _emoji in self._specs()}:
+        if self.tab not in {key for key, _label in self._specs()}:
             self.tab = "memories"
         if self.tab == _PROFILE:
             self.profile.build()
@@ -37,14 +37,11 @@ class MeHub(Hub):
             self.memory.build()
 
     def place(self, items: "list[discord.ui.Item]") -> None:
-        tabs = [
-            Tab(label, self._go(key), active=key == self.tab, emoji=emoji)
-            for key, label, emoji in self._specs()
-        ]
+        tabs = [Tab(label, self._go(key), active=key == self.tab) for key, label in self._specs()]
         super().place([*tab_bar(tabs), *items])
 
-    def _specs(self) -> list[tuple[str, str, str]]:
-        return [(_PROFILE, "Profil", ""), *self.memory.tab_specs()]
+    def _specs(self) -> list[tuple[str, str]]:
+        return [(_PROFILE, "Profil"), *self.memory.tab_specs()]
 
     def _go(self, key: str) -> Run:
         async def run(interaction: discord.Interaction) -> None:

@@ -195,7 +195,7 @@ async def test_the_profile_menu_shows_values_and_where_they_come_from(tmp_path: 
     labels = [
         str(item.label) for item in hub.walk_children() if isinstance(item, discord.ui.Button)
     ]
-    assert labels == ["Modifier", "Effacer", "Retour"]
+    assert labels == ["Modifier", "Effacer", "← Retour"]
     hub.selected = "tone"
     hub.build()
     selects = [item for item in hub.walk_children() if isinstance(item, discord.ui.Select)]
