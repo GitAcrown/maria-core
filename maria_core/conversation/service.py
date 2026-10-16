@@ -44,6 +44,7 @@ __all__ = ["UNAVAILABLE_TEXT", "ConversationService", "DraftDesk"]
 logger = logging.getLogger(__name__)
 
 type Thinking = Callable[[], AbstractAsyncContextManager[object]]
+type Waiting = Callable[[str], AbstractAsyncContextManager[object]]
 
 _MAX_MESSAGES = 80
 _MAX_TOKENS = 10_000
@@ -113,11 +114,17 @@ class ConversationService:
     def add_source(self, source: ContextSource) -> None:
         self._sources.append(source)
 
-    async def handle(self, message: Inbound, *, thinking: Thinking | None = None) -> Reply | None:
+    async def handle(
+        self,
+        message: Inbound,
+        *,
+        thinking: Thinking | None = None,
+        waiting: Waiting | None = None,
+    ) -> Reply | None:
         """Chaque message retenu entre dans le fil ; seul le dernier d'une rafale reçoit réponse."""
         policy = await asyncio.to_thread(load_policy, self._database, message)
         if message.edited:
-            return await self._edited(message, policy, thinking)
+            return await self._edited(message, policy, thinking, waiting)
         await self._note(message)
         if self.drafts is not None and not message.is_dm and await self.drafts.answer(message):
             self._history(message.channel_id).add(user_entry(message, addressed=True))
@@ -153,7 +160,7 @@ class ConversationService:
             latest = await self._debouncer.submit(message)
             if latest is None:
                 return None
-            return await self._answer(latest, policy, route, None if early else thinking)
+            return await self._answer(latest, policy, route, None if early else thinking, waiting)
 
     async def transcribe(self, audio: AudioRef) -> str:
         try:
@@ -200,7 +207,11 @@ class ConversationService:
             self._history(channel_id).add(_assistant_entry(text, addressee=addressee))
 
     async def _edited(
-        self, message: Inbound, policy: Policy, thinking: Thinking | None
+        self,
+        message: Inbound,
+        policy: Policy,
+        thinking: Thinking | None,
+        waiting: Waiting | None,
     ) -> Reply | None:
         history = self._history(message.channel_id)
         if not history.contains(message.message_id):
@@ -214,7 +225,7 @@ class ConversationService:
         history.replace(message.message_id, user_entry(message, addressed=addressed))
         if not addressed or not self._admits(message, route, policy):
             return None
-        return await self._answer(message, policy, route, thinking)
+        return await self._answer(message, policy, route, thinking, waiting)
 
     async def _quiet(self, message: Inbound, route: Route, policy: Policy) -> None:
         if self._social is None:
@@ -277,7 +288,12 @@ class ConversationService:
         return route
 
     async def _answer(
-        self, message: Inbound, policy: Policy, route: Route, thinking: Thinking | None
+        self,
+        message: Inbound,
+        policy: Policy,
+        route: Route,
+        thinking: Thinking | None,
+        waiting: Waiting | None = None,
     ) -> Reply | None:
         history = self._history(message.channel_id)
         files = await self._digest(message)
@@ -291,6 +307,7 @@ class ConversationService:
             model=str(getattr(self._client, "model_name", "") or ""),
             extras=extras,
             silence=can_stay_silent(message, route),
+            waiting=waiting,
         )
         lock = self._locks.setdefault(message.channel_id, asyncio.Lock())
         async with lock, self._turns, (thinking or nullcontext)():

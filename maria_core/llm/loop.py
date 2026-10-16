@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
@@ -19,6 +20,8 @@ _NUDGE = "[SYSTEM] Réponds maintenant, en une réponse finale."
 
 type ToolExecutor = Callable[[ToolCall], Awaitable[Result]]
 type ParallelSafe = Callable[[str], bool]
+# Ouvert au premier lot d'outils, fermé en fin de tour : l'annonce d'un outil lent.
+type Waiting = Callable[[Sequence[str]], AbstractAsyncContextManager[object]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +57,7 @@ class _Turn:
     calls: int = 0
     error: str = ""
     nudged: bool = False
+    waited: bool = False
 
 
 async def complete_turn(
@@ -66,25 +70,36 @@ async def complete_turn(
     max_turns: int = MAX_TOOL_TURNS,
     first_choice: ToolChoice = "auto",
     parallel_safe: ParallelSafe | None = None,
+    waiting: Waiting | None = None,
 ) -> LoopResult:
     turn = _Turn(messages=[{"role": "system", "content": system}], records=[])
     turn.messages.extend(dict(item) for item in history)
     started = perf_counter()
     ok = True
-    for index in range(max_turns):
-        allow_tools = bool(tools) and index < max_turns - 1
-        choice: ToolChoice = "none" if not allow_tools else first_choice if index == 0 else "auto"
-        completion = await _ask(client, turn, tools, choice)
-        if completion is None:
-            ok = False
-            break
-        if completion.tool_calls and allow_tools:
-            await _run_tools(turn, completion, execute, parallel_safe)
-            continue
-        if turn.text or turn.records or turn.nudged or index + 1 >= max_turns:
-            break
-        turn.nudged = True
-        turn.messages.append({"role": "user", "content": _NUDGE})
+    async with AsyncExitStack() as stack:
+
+        async def announce(names: Sequence[str]) -> None:
+            if waiting is not None and not turn.waited:
+                turn.waited = True
+                await stack.enter_async_context(waiting(names))
+
+        for index in range(max_turns):
+            allow_tools = bool(tools) and index < max_turns - 1
+            choice: ToolChoice = (
+                "none" if not allow_tools else first_choice if index == 0 else "auto"
+            )
+            completion = await _ask(client, turn, tools, choice)
+            if completion is None:
+                ok = False
+                break
+            if completion.tool_calls and allow_tools:
+                await announce([call.name for call in completion.tool_calls])
+                await _run_tools(turn, completion, execute, parallel_safe)
+                continue
+            if turn.text or turn.records or turn.nudged or index + 1 >= max_turns:
+                break
+            turn.nudged = True
+            turn.messages.append({"role": "user", "content": _NUDGE})
     return _result(turn, ok, started)
 
 

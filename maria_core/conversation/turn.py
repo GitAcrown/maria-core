@@ -1,14 +1,18 @@
 """Un tour avec le modèle : prompt, outils, garde-fous, nouvel essai sans image."""
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field, replace
 
 from maria_core.capabilities import CapabilityRegistry, Context, Result, Risk
 from maria_core.capabilities.runner import SlotSource, available, invoke
 from maria_core.config import Settings
+from maria_core.conversation.calc import HINT as CALC_HINT
+from maria_core.conversation.calc import needs_calculation
 from maria_core.conversation.context import SILENCE_GUIDE, focus_note, turn_header
 from maria_core.conversation.model import Inbound, Policy
+from maria_core.conversation.progress import progress_label
 from maria_core.db import Database
 from maria_core.decisions.engine import Decider
 from maria_core.llm.history import ChannelHistory
@@ -38,6 +42,7 @@ class TurnInput:
     silence: bool = False
     files: str = ""
     deny: frozenset[str] = field(default_factory=frozenset)
+    waiting: Callable[[str], AbstractAsyncContextManager[object]] | None = None
 
 
 class TurnRunner:
@@ -62,6 +67,9 @@ class TurnRunner:
 
     async def run(self, data: TurnInput) -> LoopResult:
         choice = await self._choice(data.message)
+        if needs_calculation(data.message.text) and "calculate" in self._capabilities:
+            data = replace(data, extras=(*data.extras, CALC_HINT))
+            choice = "required"
         outcome = await self._once(data, choice)
         outcome = await self._verified(data, outcome)
         if not outcome.ok and any(word in outcome.error.lower() for word in _IMAGE_ERRORS):
@@ -144,6 +152,7 @@ class TurnRunner:
             execute=execute,
             first_choice=choice if tools else "auto",
             parallel_safe=self._parallel_safe,
+            waiting=(lambda names: data.waiting(progress_label(names))) if data.waiting else None,
         )
 
     def _parallel_safe(self, name: str) -> bool:
