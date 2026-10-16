@@ -58,3 +58,47 @@ async def test_the_menu_works_on_a_card_posted_by_a_bot() -> None:
     (picker,) = [i for i in hub.walk_children() if hasattr(i, "options")]
     await picker.run(_Interaction(), "translate")
     assert "Hello everyone" in str(client.seen[0][1]["content"])
+
+
+async def test_opening_the_menu_does_not_replace_the_targeted_message() -> None:
+    """Le menu a son propre message (éphémère) : il ne doit pas prendre sa place comme cible."""
+    client = ScriptedClient([Completion(text="Il l'a déjà", model="fake")])
+    target = Box(
+        author=Box(name="wikimasters", display_name="WikiMasters"),
+        content="He already has it",
+        embeds=[],
+        components=[],
+    )
+    menu_message = Box(
+        author=Box(name="maria", display_name="MARIA"),
+        content="",
+        embeds=[],
+        components=[_card("Que veux-tu faire de ce message ?")],
+    )
+    hub = AskHub(Assistant(client), target, 7)
+
+    class _Opening:
+        user = Box(id=7)
+
+        def __init__(self) -> None:
+            self.response = Box(
+                send_message=self._send, is_done=lambda: False, edit_message=self._edit
+            )
+
+        async def _send(self, **_options: Any) -> None: ...
+
+        async def _edit(self, **_options: Any) -> None: ...
+
+        async def original_response(self) -> Any:
+            return menu_message
+
+        async def edit_original_response(self, **_options: Any) -> None: ...
+
+    interaction = _Opening()
+    await hub.open(interaction)  # type: ignore[arg-type]
+    assert hub.message is menu_message  # c'est le message du menu, pas la cible
+    (picker,) = [i for i in hub.walk_children() if hasattr(i, "options")]
+    await picker.run(interaction, "translate")
+    sent = str(client.seen[0][1]["content"])
+    assert "He already has it" in sent and "Que veux-tu faire" not in sent
+    assert "wikimasters" in sent
