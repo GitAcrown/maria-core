@@ -1,4 +1,4 @@
-"""Une courte ligne quand MARIA met plus de deux secondes à répondre, effacée ensuite."""
+"""Une courte ligne quand un outil met plus de deux secondes, effacée avec la réponse."""
 
 import asyncio
 import logging
@@ -7,7 +7,7 @@ from types import TracebackType
 
 import discord
 
-from maria_core.conversation.progress import DELAY_S, THINKING
+from maria_core.conversation.progress import DELAY_S, default_label
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +20,10 @@ class SlowNotice:
     """
 
     def __init__(
-        self, message: discord.Message, label: str = THINKING, *, delay: float = DELAY_S
+        self, message: discord.Message, label: str = "", *, delay: float = DELAY_S
     ) -> None:
         self.message = message
-        self.label = label
+        self.label = label or default_label()
         self.delay = delay
         self._timer: asyncio.Task[None] | None = None
         self._sending: asyncio.Future[discord.Message] | None = None

@@ -2,11 +2,11 @@
 
 import asyncio
 import logging
-from collections.abc import Callable, Sequence
-from contextlib import AbstractAsyncContextManager, nullcontext
+from collections.abc import Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 
 from maria_core.attachments import Digester
 from maria_core.capabilities import CapabilityRegistry
@@ -319,13 +319,12 @@ class ConversationService:
             silence=can_stay_silent(message, route),
         )
         lock = self._locks.setdefault(message.channel_id, asyncio.Lock())
-        async with lock, self._turns, (thinking or nullcontext)():
-            # Pas d'annonce quand MARIA peut se taire : on l'afficherait pour rien.
-            show = waiting() if waiting is not None and not data.silence else nullcontext()
-            async with show as notice:
-                if notice is not None:
-                    data = replace(data, announce=lambda names: notice.say(progress_label(names)))
-                outcome = await self._runner.run(data)
+        async with lock, self._turns, (thinking or nullcontext)(), AsyncExitStack() as stack:
+            # Une annonce seulement pour un outil lent, jamais pour le bavardage : elle s'ouvre
+            # au premier outil et se ferme avec le tour.
+            if waiting is not None and not data.silence:
+                data = replace(data, announce=_announcer(waiting, stack))
+            outcome = await self._runner.run(data)
         await asyncio.to_thread(self._log_usage, outcome)
         composed = compose(outcome, self._widgets, message.bot_names)
         if await self._silent(message, composed):
@@ -474,3 +473,18 @@ def _note_entry(note: str, reply_to: int) -> HistoryEntry:
         reply_to=reply_to,
         note=True,
     )
+
+
+def _announcer(
+    waiting: Waiting, stack: AsyncExitStack
+) -> Callable[[Sequence[str]], Awaitable[None]]:
+    """Le premier lot d'outils ouvre l'annonce ; chaque suivant change la phrase, sans répéter."""
+    state: dict[str, Any] = {"notice": None, "last": ""}
+
+    async def announce(names: Sequence[str]) -> None:
+        state["last"] = label = progress_label(names, state["last"])
+        if state["notice"] is None:
+            state["notice"] = await stack.enter_async_context(waiting())
+        await state["notice"].say(label)
+
+    return announce
