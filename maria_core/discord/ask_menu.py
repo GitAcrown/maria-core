@@ -49,7 +49,7 @@ class AskHub(Hub):
     ) -> None:
         super().__init__(viewer_id=user_id)
         self.assistant = assistant
-        self.message = message
+        self.target = message  # le message visé : `self.message` est celui du menu lui-même
         self.app = app
         self.actor = actor
 
@@ -63,7 +63,7 @@ class AskHub(Hub):
         )
 
     def build(self) -> None:
-        author = self.message.author.name
+        author = self.target.author.name
         content = [
             title("Demander à MARIA", f"Message de {author}"),
             wide(),
@@ -82,7 +82,7 @@ class AskHub(Hub):
             await self._answer(interaction, BY_KEY[value])
 
     async def _keep(self, interaction: discord.Interaction) -> None:
-        text = text_of(self.message)
+        text = text_of(self.target)
         if not text:
             await refuse(interaction, "Ce message n'a pas de texte à retenir.")
             return
@@ -101,11 +101,11 @@ class AskHub(Hub):
         )
         text = await self.assistant.run(
             action.key,
-            text_of(self.message),
+            text_of(self.target),
             user_id=interaction.user.id,
-            author=self.message.author.name,
+            author=self.target.author.name,
         )
-        author = self.message.author.name
+        author = self.target.author.name
         await interaction.edit_original_response(
             view=card(action.title, text, meta=f"Message de {author}"), allowed_mentions=NO_PINGS
         )
