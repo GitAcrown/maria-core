@@ -1,17 +1,20 @@
 """Le profil vu de MARIA : ce qu'elle sait de la personne, et ce qu'elle en déduit."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from maria_core.conversation.model import Inbound
 from maria_core.db import Database
-from maria_core.profile.extract import extract
+from maria_core.profile.extract import extract, extract_memory
 from maria_core.profile.slots import BY_KEY, FACTS, GUIDANCE, SLOTS, STYLE, Slot
 from maria_core.profile.store import ProfileStore
 from maria_core.profile.style import StyleTracker
 
 type Clock = Callable[[], datetime]
+type Memories = Callable[[int], Sequence[str]]
+
+_RESCAN = timedelta(minutes=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,16 +27,39 @@ class Resolved:
 
 
 class Profiles:
-    def __init__(self, database: Database, clock: Clock | None = None) -> None:
+    def __init__(
+        self, database: Database, clock: Clock | None = None, memories: Memories | None = None
+    ) -> None:
         self.store = ProfileStore(database)
         self.style = StyleTracker(database)
         self._clock = clock or _now
+        self._memories = memories
+        self._scanned: dict[int, datetime] = {}
 
     def now(self) -> datetime:
         return self._clock()
 
+    def absorb(self, user_id: int, *, force: bool = False) -> None:
+        """Ce que ses souvenirs disent déjà (« Tu habites à Lyon ») remplit les champs vides.
+
+        Au plus une lecture par minute et par personne, sauf si `force`.
+        """
+        if self._memories is None:
+            return
+        now = self.now()
+        last = self._scanned.get(user_id)
+        if not force and last is not None and now - last < _RESCAN:
+            return
+        self._scanned[user_id] = now
+        saved = self.store.all(user_id)
+        for text in self._memories(user_id):
+            for key, value in extract_memory(text).items():
+                if key not in saved and self.store.learn(user_id, key, value, now):
+                    saved = self.store.all(user_id)
+
     def resolve(self, user_id: int) -> dict[str, Resolved]:
         """Un champ par clé : réglé par la personne, appris, ou déduit du style."""
+        self.absorb(user_id)
         saved = self.store.all(user_id)
         deduced = self.style.learned(user_id)
         found: dict[str, Resolved] = {}
@@ -47,7 +73,10 @@ class Profiles:
 
     def value(self, user_id: int, key: str) -> str:
         """Valeur utilisable par un outil : un champ de faits, jamais un style déduit."""
-        return self.store.value(user_id, key) if key in {slot.key for slot in FACTS} else ""
+        if key not in {slot.key for slot in FACTS}:
+            return ""
+        self.absorb(user_id)
+        return self.store.value(user_id, key)
 
     def label(self, key: str) -> str:
         slot = BY_KEY.get(key)

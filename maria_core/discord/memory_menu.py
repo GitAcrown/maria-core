@@ -235,7 +235,7 @@ class MemoryHub(Hub):
     def _age(self, item: Memory | Proposal) -> str:
         if self.tab != "recent" or not isinstance(item, Memory):
             return ""
-        return f"  -# {_ago(self.app.memory.now() - item.updated_at)}"
+        return f" · *{_ago(self.app.memory.now() - item.updated_at)}*"
 
     def _heading(self) -> str:
         return f"Mémoire · {self.state.name}"
