@@ -8,7 +8,6 @@ from maria_core.app import App
 from maria_core.discord.hub import Action, Hub, Picker, body, option, thin, title, wide
 from maria_core.profile.service import Resolved
 from maria_core.profile.slots import BY_KEY, FACTS, STYLE, Slot
-from maria_core.ui.emojis import SLOT_ICONS
 
 _PROVENANCE = {
     "user": "réglé par toi",
@@ -57,10 +56,7 @@ class ProfileHub(Hub):
         ]
         if self.note:
             content += [thin(), body(f"-# {self.note}")]
-        options = [
-            option(slot.key, slot.label, self._plain(slot), SLOT_ICONS.get(slot.key, ""))
-            for slot in (*FACTS, *STYLE)
-        ]
+        options = [option(slot.key, slot.label, self._plain(slot)) for slot in (*FACTS, *STYLE)]
         rows = [
             discord.ui.ActionRow(Picker("Modifier un champ…", options, self._open)),
             discord.ui.ActionRow(Action("Réinitialiser le style", self._reset, style=_RED)),
@@ -69,9 +65,8 @@ class ProfileHub(Hub):
 
     def _slot(self, slot: Slot) -> None:
         current = self.found.get(slot.key)
-        icon = SLOT_ICONS.get(slot.key, "")
         content: list[discord.ui.Item] = [
-            title(f"{icon} {slot.label}".strip(), slot.hint),
+            title(slot.label, slot.hint),
             wide(),
             body(self._value_line(slot, current)),
         ]
@@ -92,9 +87,7 @@ class ProfileHub(Hub):
         self.set_layout(content, *rows)
 
     def _line(self, slot: Slot) -> str:
-        icon = SLOT_ICONS.get(slot.key, "")
-        value = self._value_line(slot, self.found.get(slot.key))
-        return f"{icon} **{slot.label}** · {value}".strip()
+        return f"**{slot.label}** · {self._value_line(slot, self.found.get(slot.key))}"
 
     @staticmethod
     def _value_line(slot: Slot, current: Resolved | None) -> str:
