@@ -1,13 +1,18 @@
 """« Demander à MARIA » : un clic droit, une réponse éphémère, jamais de suite."""
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
 import discord
 
 from maria_core.conversation.assist import COOLDOWN_S, FAILED, Assistant
+from maria_core.db import Database
 from maria_core.discord.ask_menu import NAME, AskCog, AskHub
 from maria_core.llm.types import Completion
+from maria_core.memory.policy import Actor
+from maria_core.memory.service import Memories
+from maria_core.vectors import NullIndex
 from tests.fakes import ScriptedClient
 
 
@@ -101,3 +106,87 @@ def test_the_context_menu_is_a_message_command_for_servers() -> None:
     menu = cog._menu
     assert menu.type == discord.AppCommandType.message and menu.name == NAME == "Demander à MARIA"
     assert menu.guild_only
+
+
+class _Keeper(_Interaction):
+    def __init__(self, user_id: int = 7) -> None:
+        super().__init__(user_id)
+        self.guild_id = 5
+        self.modal: Any = None
+        self.refusals: list[str] = []
+        self.response = SimpleNamespace(
+            edit_message=self._edit, send_modal=self._send_modal, send_message=self._send
+        )
+
+    async def _send_modal(self, modal: Any) -> None:
+        self.modal = modal
+
+    async def _send(self, text: str, **_options: Any) -> None:
+        self.refusals.append(text)
+
+
+def _book(tmp_path: Any) -> Any:
+    database = Database(tmp_path / "maria.db")
+    database.migrate()
+    return Memories(
+        database, NullIndex(), clock=lambda: datetime(2026, 10, 16, tzinfo=UTC)
+    ), database
+
+
+def test_only_moderators_get_the_keep_for_the_server_button() -> None:
+    def labels(actor: Any, app: Any) -> list[str]:
+        hub = AskHub(Assistant(ScriptedClient([])), _message(), 7, app=app, actor=actor)
+        hub.build()
+        return [button.label for button in _buttons(hub)]
+
+    app = SimpleNamespace()
+    assert "Retenir pour le serveur" in labels(Actor(7, False, True), app)
+    assert "Retenir pour le serveur" in labels(Actor(7, True, False), app)
+    assert "Retenir pour le serveur" not in labels(Actor(7, False, False), app)
+    assert "Retenir pour le serveur" not in labels(None, None)
+
+
+async def test_a_moderator_keeps_the_message_for_the_server_after_editing_it(tmp_path: Any) -> None:
+    book, database = _book(tmp_path)
+    app = SimpleNamespace(memory=book)
+    hub = AskHub(
+        Assistant(ScriptedClient([])),
+        _message("Le salon jeux ferme à minuit"),
+        7,
+        app=app,
+        actor=Actor(7, False, True),
+    )
+    hub.build()
+    keep = next(button for button in _buttons(hub) if button.label == "Retenir pour le serveur")
+    interaction = _Keeper()
+    await keep.callback(interaction)  # type: ignore[arg-type]
+    modal = interaction.modal
+    assert modal.fact.default == "Le salon jeux ferme à minuit"
+    modal.fact._value = "Le salon jeux ferme à 23h"
+    await modal.on_submit(interaction)
+    saved = book.store.list_guild(5)
+    assert [item.content for item in saved] == ["Le salon jeux ferme à 23h"]
+    (card_view,) = interaction.views
+    assert "Retenu pour le serveur" in _texts(card_view) and _buttons(card_view) == []
+    assert hub.is_finished()
+    database.close()
+
+
+async def test_nothing_is_kept_without_the_right_or_without_text(tmp_path: Any) -> None:
+    book, database = _book(tmp_path)
+    app = SimpleNamespace(memory=book)
+    weak = AskHub(
+        Assistant(ScriptedClient([])), _message("Un fait"), 7, app=app, actor=Actor(7, False, False)
+    )
+    interaction = _Keeper()
+    await weak._keep(interaction)  # type: ignore[arg-type]
+    await interaction.modal.on_submit(interaction)
+    assert book.store.list_guild(5) == ()
+    assert "Rien n'a été retenu" in _texts(interaction.views[0])
+    strong = AskHub(
+        Assistant(ScriptedClient([])), _message("   "), 7, app=app, actor=Actor(7, False, True)
+    )
+    empty = _Keeper()
+    await strong._keep(empty)  # type: ignore[arg-type]
+    assert empty.modal is None and "pas de texte" in empty.refusals[0]
+    database.close()
