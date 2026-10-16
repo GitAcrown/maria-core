@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 
 from maria_core.app import App
+from maria_core.discord.ask_menu import AskCog
 from maria_core.discord.chat import ChatCog
 from maria_core.discord.commands.owner import OwnerCommands
 from maria_core.discord.commands.public import PublicCommands
@@ -119,6 +120,7 @@ class MariaBot(commands.Bot):
             SocialCommands(self),
             UsageCommands(self, app),
             PublicCommands(self),
+            AskCog(self, app),
             PresenceCog(self, app.settings.data_dir / "statuses.txt"),
         ):
             await self.add_cog(cog)
