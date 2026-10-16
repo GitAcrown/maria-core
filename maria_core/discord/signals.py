@@ -57,7 +57,7 @@ class SignalCog(commands.Cog):
                     channel_id=channel_id,
                     guild_id=member.guild.id,
                     user_id=member.id,
-                    author_name=member.display_name,
+                    author_name=member.name,
                     place=getattr(place, "name", "") or "",
                 )
             )
@@ -73,7 +73,7 @@ class SignalCog(commands.Cog):
                 channel_id=0,
                 guild_id=member.guild.id,
                 user_id=member.id,
-                author_name=member.display_name,
+                author_name=member.name,
                 place=member.guild.name,
             )
         )

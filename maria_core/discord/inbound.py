@@ -36,7 +36,7 @@ async def inbound_from_message(
         message_id=message.id,
         guild_id=message.guild.id if message.guild else None,
         author_id=message.author.id,
-        author_name=message.author.display_name,
+        author_name=message.author.name,
         text=message.content or "",
         is_dm=message.guild is None,
         author_is_bot=message.author.bot,
@@ -51,7 +51,7 @@ async def inbound_from_message(
         audio=_audio(message),
         mentioned_ids=tuple(item.id for item in message.mentions if item.id != user.id),
         mentioned_names=tuple(
-            (item.id, item.display_name) for item in message.mentions if item.id != user.id
+            (item.id, item.name) for item in message.mentions if item.id != user.id
         ),
         created_at=message.created_at,
         settings_channel_id=_parent_id(message.channel),
@@ -76,7 +76,7 @@ async def quote_of(message: discord.Message, bot_id: int) -> Quote | None:
     return Quote(
         message_id=resolved.id,
         author_id=resolved.author.id,
-        author_name=resolved.author.display_name,
+        author_name=resolved.author.name,
         text=_preview(resolved),
         from_bot_self=resolved.author.id == bot_id,
         from_bot=resolved.author.bot,

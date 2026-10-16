@@ -77,9 +77,7 @@ async def _find_member(
 def _card(member: discord.Member) -> MemberCard:
     roles = tuple(role.name for role in member.roles if role.name != "@everyone")
     joined = member.joined_at.isoformat() if member.joined_at else ""
-    return MemberCard(
-        user_id=member.id, name=member.display_name, roles=roles[:12], joined_at=joined
-    )
+    return MemberCard(user_id=member.id, name=member.name, roles=roles[:12], joined_at=joined)
 
 
 def _matches(member: discord.Member, query: str) -> bool:

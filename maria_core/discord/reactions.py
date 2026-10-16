@@ -87,7 +87,7 @@ class ReactionCog(commands.Cog):
                 channel_id=int(place),
                 guild_id=payload.guild_id,
                 user_id=payload.user_id,
-                author_name=member.display_name if member is not None else "",
+                author_name=member.name if member is not None else "",
                 url=f"https://discord.com/channels/{payload.guild_id}/{payload.channel_id}/{payload.message_id}",
                 message_id=payload.message_id,
                 emoji=emoji,

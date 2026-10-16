@@ -12,8 +12,18 @@ from discord import app_commands
 from discord.ext import commands
 
 from maria_core.app import App
-from maria_core.conversation.assist import CHOICES, Assistant, Choice
-from maria_core.discord.hub import NO_PINGS, Action, Hub, Run, body, card, refuse, title, wide
+from maria_core.conversation.assist import BY_KEY, CHOICES, Assistant, Choice
+from maria_core.discord.hub import (
+    NO_PINGS,
+    Hub,
+    Picker,
+    body,
+    card,
+    option,
+    refuse,
+    title,
+    wide,
+)
 from maria_core.memory.policy import Actor
 from maria_core.memory.store import MemoryDenied
 
@@ -21,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 NAME = "Demander à MARIA"
 _KEEP_CHARS = 500
+_KEEP = "keep"
 
 
 class AskHub(Hub):
@@ -51,22 +62,23 @@ class AskHub(Hub):
         )
 
     def build(self) -> None:
-        author = self.message.author.display_name
+        author = self.message.author.name
         content = [
             title("Demander à MARIA", f"Message de {author}"),
             wide(),
             body("Que veux-tu faire de ce message ?"),
         ]
-        buttons = [Action(choice.button, self._run(choice)) for choice in CHOICES]
+        options = [option(choice.key, choice.button) for choice in CHOICES]
         if self.can_keep:
-            buttons.append(Action("Retenir pour le serveur", self._keep))
-        self.set_layout(content, discord.ui.ActionRow(*buttons))
+            options.append(option(_KEEP, "Retenir pour le serveur"))
+        picker = Picker("Choisir une action…", options, self._pick)
+        self.set_layout(content, discord.ui.ActionRow(picker))
 
-    def _run(self, choice: Choice) -> Run:
-        async def run(interaction: discord.Interaction) -> None:
-            await self._answer(interaction, choice)
-
-        return run
+    async def _pick(self, interaction: discord.Interaction, value: str) -> None:
+        if value == _KEEP:
+            await self._keep(interaction)
+        elif value in BY_KEY:
+            await self._answer(interaction, BY_KEY[value])
 
     async def _keep(self, interaction: discord.Interaction) -> None:
         text = _text_of(self.message)
@@ -90,9 +102,9 @@ class AskHub(Hub):
             action.key,
             _text_of(self.message),
             user_id=interaction.user.id,
-            author=self.message.author.display_name,
+            author=self.message.author.name,
         )
-        author = self.message.author.display_name
+        author = self.message.author.name
         await interaction.edit_original_response(
             view=card(action.title, text, meta=f"Message de {author}"), allowed_mentions=NO_PINGS
         )
