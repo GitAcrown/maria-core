@@ -43,19 +43,10 @@ def kind_label(
     return "Tâche"
 
 
-def recipient(objective: Objective, *, mention: bool = False) -> str:
-    """À qui s'adresse le rappel : « toi », ou la personne (son nom, ou sa mention)."""
-    if objective.target_id is None or objective.target_id == objective.owner_id:
-        return "toi"
-    name = str(objective.state.get("target_name") or "")
-    return f"<@{objective.target_id}>" if mention or not name else name
-
-
-def route(objective: Objective, *, mention: bool = False) -> str:
-    """Où il part : dans le salon (lequel) ou en message privé (à qui)."""
+def route(objective: Objective) -> str:
+    """Où il part : dans le salon (lequel) ou en message privé."""
     if objective.deliver == "dm":
-        other = recipient(objective, mention=mention)
-        return "en message privé" if other == "toi" else f"en message privé à {other}"
+        return "en message privé"
     if objective.channel_ids:
         return f"dans <#{objective.channel_ids[0]}>"
     return "dans le salon"

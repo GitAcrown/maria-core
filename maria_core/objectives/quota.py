@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from maria_core.db import Database
 
 MAX_OPEN = 10
-MAX_FOR_OTHERS = 3
 MAX_FETCHES_PER_DAY = 40
 MIN_FETCH_INTERVAL_S = 6 * 3600
 STORM_PER_HOUR = 3
@@ -16,19 +15,6 @@ def open_count(database: Database, owner_id: int) -> int:
         """
         SELECT COUNT(*) AS n FROM objectives
         WHERE owner_id = ? AND status IN ('draft', 'active', 'paused')
-        """,
-        (owner_id,),
-    )
-    return 0 if row is None else int(row["n"])
-
-
-def open_for_others(database: Database, owner_id: int) -> int:
-    """Rappels en attente que cette personne a programmés pour quelqu'un d'autre."""
-    row = database.fetchone(
-        """
-        SELECT COUNT(*) AS n FROM objectives
-        WHERE owner_id = ? AND target_id IS NOT NULL AND target_id != owner_id
-          AND status IN ('draft', 'active', 'paused')
         """,
         (owner_id,),
     )

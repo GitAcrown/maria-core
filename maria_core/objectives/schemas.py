@@ -64,13 +64,9 @@ GUIDE = (
     "(daily, weekly, interval, repeat=true) et les veilles de page ou de prix sont des "
     "brouillons : explique en une phrase, ils partent après un oui (objective_update "
     "op=confirm). Ajustement : op=modify.\n"
-    "- Rappel pour QUELQU'UN D'AUTRE (« rappelle à Paul de… ») : for_user_id = son id Discord "
-    "(get_server_users ou get_member_info), seulement un rappel à date (at) au texte fixe ; "
-    "toujours un brouillon, il part après le oui de la personne qui demande. Le texte s'adresse "
-    "alors au destinataire (« Tu dois rendre le dossier »). deliver=dm pour le prévenir en "
-    "message privé, sinon il est pingé dans le salon.\n"
-    "- Après chaque création, la carte indique « Pour » (qui) et « Envoi » (salon ou message "
-    "privé) : ne les répète pas, et ne dis jamais que c'est pour toi si ce ne l'est pas."
+    "- Un rappel est toujours pour la personne qui le demande : tu ne peux pas programmer un "
+    "rappel ou une alerte pour quelqu'un d'autre, dis-le simplement si on te le demande. Après "
+    "chaque création, la carte indique « Envoi » (salon ou message privé) : ne le répète pas."
 )
 
 
@@ -137,9 +133,5 @@ def _fields() -> dict[str, Any]:
         "condition_when": {"type": "string", "enum": ["before", "after"]},
         "threshold": {"type": "number", "description": "Seuil en € ou en %"},
         "deliver": {"type": "string", "enum": ["channel", "dm"]},
-        "for_user_id": {
-            "type": "string",
-            "description": "Id Discord du destinataire si ce n'est pas la personne qui demande",
-        },
         "max_fires": {"type": "integer", "minimum": 1},
     }
