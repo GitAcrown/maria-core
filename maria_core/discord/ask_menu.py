@@ -24,6 +24,7 @@ from maria_core.discord.hub import (
     title,
     wide,
 )
+from maria_core.discord.message_text import text_of
 from maria_core.memory.policy import Actor
 from maria_core.memory.store import MemoryDenied
 
@@ -81,7 +82,7 @@ class AskHub(Hub):
             await self._answer(interaction, BY_KEY[value])
 
     async def _keep(self, interaction: discord.Interaction) -> None:
-        text = _text_of(self.message)
+        text = text_of(self.message)
         if not text:
             await refuse(interaction, "Ce message n'a pas de texte à retenir.")
             return
@@ -100,7 +101,7 @@ class AskHub(Hub):
         )
         text = await self.assistant.run(
             action.key,
-            _text_of(self.message),
+            text_of(self.message),
             user_id=interaction.user.id,
             author=self.message.author.name,
         )
@@ -149,13 +150,6 @@ class _Keep(discord.ui.Modal, title="Retenir pour le serveur"):
             view=card(heading, text, meta=meta), allowed_mentions=NO_PINGS
         )
         hub.stop()
-
-
-def _text_of(message: discord.Message) -> str:
-    """Le texte du message, plus le texte de ses aperçus (liens, citations)."""
-    parts = [message.content or ""]
-    parts += [embed.description for embed in message.embeds if embed.description]
-    return "\n\n".join(part.strip() for part in parts if part and part.strip())
 
 
 class AskCog(commands.Cog):
