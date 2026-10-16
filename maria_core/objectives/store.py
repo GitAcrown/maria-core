@@ -8,7 +8,7 @@ from typing import Any
 
 from maria_core.db import Database
 from maria_core.objectives.model import Objective, ObjectiveQuota, StaleObjective
-from maria_core.objectives.quota import MAX_OPEN, open_count
+from maria_core.objectives.quota import MAX_FOR_OTHERS, MAX_OPEN, open_count, open_for_others
 from maria_core.objectives.schedule import first_due
 
 LEASE = timedelta(seconds=60)
@@ -37,12 +37,21 @@ class ObjectiveStore:
         status: str = "active",
         origin_message_id: int | None = None,
         state: Mapping[str, Any] | None = None,
+        target_id: int | None = None,
     ) -> tuple[Objective, bool]:
         duplicate = self.find_duplicate(owner_id, trigger, action, condition)
-        if duplicate is not None:
+        if duplicate is not None and duplicate.target_id == target_id:
             return duplicate, False
         if open_count(self._database, owner_id) >= MAX_OPEN:
             raise ObjectiveQuota(f"Plafond de {MAX_OPEN} objectifs atteint.")
+        if (
+            target_id not in (None, owner_id)
+            and open_for_others(self._database, owner_id) >= MAX_FOR_OTHERS
+        ):
+            raise ObjectiveQuota(
+                f"Tu as déjà {MAX_FOR_OTHERS} rappels en attente pour d'autres : "
+                "attends qu'ils partent."
+            )
         moment = first_due(trigger, now)
         stamp = now.isoformat()
         result = self._database.execute(
@@ -51,8 +60,8 @@ class ObjectiveStore:
                 owner_id, guild_id, channel_ids, deliver, title, trigger_json,
                 condition_json, action_json, status, next_run_at, fires, max_fires,
                 cooldown_s, expires_at, state_json, version, last_error, created_at, updated_at,
-                origin_message_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 1, '', ?, ?, ?)
+                origin_message_id, target_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 1, '', ?, ?, ?, ?)
             """,
             (
                 owner_id,
@@ -72,6 +81,7 @@ class ObjectiveStore:
                 stamp,
                 stamp,
                 origin_message_id,
+                target_id,
             ),
         )
         created = self.get(result.lastrowid)
@@ -344,6 +354,7 @@ def _objective(row: sqlite3.Row) -> Objective:
         state=json.loads(row["state_json"]),
         version=int(row["version"]),
         last_error=str(row["last_error"]),
+        target_id=int(row["target_id"]) if row["target_id"] is not None else None,
         origin_message_id=_optional_int(row["origin_message_id"]),
     )
 

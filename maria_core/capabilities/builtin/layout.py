@@ -74,17 +74,33 @@ def render_widget(data: Mapping[str, Any]) -> Rendered:
     return Rendered(cards=(built,), note=str(data.get("note") or ""))
 
 
-def render_draft(data: Mapping[str, Any]) -> Rendered:
-    """Ce qui sera créé, en petit, sous le commentaire. Aucun bouton : un « oui » valide."""
+def _objective_lines(data: Mapping[str, Any]) -> str:
+    """Quand, si, message, pour qui et où : tout ce qu'il faut savoir avant que ça parte."""
     lines = [f"**Quand** · {data.get('when')}"] if data.get("when") else []
     if data.get("if"):
         lines.append(f"**Si** · {data['if']}")
     if data.get("say"):
         lines.append(f"**Message** · {clip(str(data['say']), 300)}")
+    if data.get("for"):
+        lines.append(f"**Pour** · {data['for']}")
+    if data.get("where"):
+        lines.append(f"**Envoi** · {data['where']}")
+    return "\n".join(lines)
+
+
+def render_draft(data: Mapping[str, Any]) -> Rendered:
+    """Ce qui sera créé, en petit, sous le commentaire. Aucun bouton : un « oui » valide."""
     kind = str(data.get("kind") or "Objectif")
     hint = f"{kind} · brouillon n°{data.get('id')} · réponds « oui » ou « non »"
-    built = card(text("\n".join(lines)), footer(hint))
+    built = card(text(_objective_lines(data)), footer(hint))
     return Rendered(cards=(built,), note="Brouillon affiché, en attente d'un oui ou d'un non.")
+
+
+def render_created(data: Mapping[str, Any]) -> Rendered:
+    """Ce qui vient d'être programmé : à qui il s'adresse et où il partira."""
+    kind = str(data.get("kind") or "Objectif")
+    built = card(text(_objective_lines(data)), footer(f"{kind} · n°{data.get('id')} · programmé"))
+    return Rendered(cards=(built,), note="Objectif créé, détails affichés.")
 
 
 def render_table(data: Mapping[str, Any]) -> Rendered:

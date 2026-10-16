@@ -146,6 +146,12 @@ class App:
             return
         self._discord_bound = True
         self.channel_reader = reader
+
+        async def member_name(guild_id: int, user_id: int) -> str | None:
+            card = await directory.member(guild_id, user_id, "")
+            return card.name if card is not None else None
+
+        self.objectives.member_name = member_name
         for capability in discord_capabilities(directory):
             self.capabilities.register(capability)
         self.capabilities.register(poll_capability(poster))

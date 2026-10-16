@@ -488,26 +488,28 @@ def test_imported_reminders_become_reports_so_the_instruction_runs(tmp_path: Pat
             shutil.copy(path, older / path.name)
     database = Database(tmp_path / "maria.db", migrations_dir=older)
     database.migrate()
-    store = ObjectiveStore(database)
-    moment = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
-    rows = [
-        store.create(
-            owner_id=7,
-            guild_id=5,
-            channel_ids=(3,),
-            deliver="channel",
-            title=f"Décompte {index}",
-            trigger={"type": "daily", "time": f"1{index}:00"},
-            condition=None,
-            action={"type": "remind", "text": "Donne le nombre de jours avant Halloween."},
-            now=moment,
-        )[0]
+    moment = datetime(2026, 10, 13, 12, 0, tzinfo=UTC).isoformat()
+    ids = [
+        database.execute(
+            "INSERT INTO objectives (owner_id, guild_id, channel_ids, deliver, title, "
+            "trigger_json, action_json, status, next_run_at, fires, cooldown_s, state_json, "
+            "version, last_error, created_at, updated_at) VALUES (7, 5, '[3]', 'channel', ?, ?, "
+            "?, 'active', ?, 0, 0, '{}', 1, '', ?, ?)",
+            (
+                f"Décompte {index}",
+                json.dumps({"type": "daily", "time": f"1{index}:00"}),
+                json.dumps({"type": "remind", "text": "Donne le nombre de jours avant Halloween."}),
+                moment,
+                moment,
+                moment,
+            ),
+        ).lastrowid
         for index in range(2)
     ]
-    database.execute("INSERT INTO legacy_map VALUES ('task', '42', 'objectives', ?)", (rows[0].id,))
+    database.execute("INSERT INTO legacy_map VALUES ('task', '42', 'objectives', ?)", (ids[0],))
     database.close()
     upgraded = Database(tmp_path / "maria.db")
     upgraded.migrate()
-    kinds = [ObjectiveStore(upgraded).get(row.id).action["type"] for row in rows]
+    kinds = [ObjectiveStore(upgraded).get(row_id).action["type"] for row_id in ids]
     assert kinds == ["report", "remind"]
     upgraded.close()

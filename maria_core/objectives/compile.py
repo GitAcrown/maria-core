@@ -82,7 +82,11 @@ _RECURRING = frozenset({"daily", "weekly", "interval"})
 
 
 def needs_confirmation(
-    trigger: Mapping[str, Any], action: Mapping[str, Any], max_fires: int | None
+    trigger: Mapping[str, Any],
+    action: Mapping[str, Any],
+    max_fires: int | None,
+    *,
+    other: bool = False,
 ) -> bool:
     """Seuls les suivis qui peuvent devenir pénibles demandent un oui : ce qui se répète
     (rappel récurrent, écoute répétée) et les veilles de page ou de prix.
@@ -90,8 +94,8 @@ def needs_confirmation(
     Un rappel isolé, ou « préviens-moi une fois si on parle de ça », part tout de suite.
     """
     kind = str(trigger.get("type") or "")
-    if kind in _RECURRING or action.get("type") == "fetch_then":
-        return True
+    if other or kind in _RECURRING or action.get("type") == "fetch_then":
+        return True  # prévenir quelqu'un d'autre demande toujours un oui
     return kind in EVENT_TRIGGERS and max_fires != 1
 
 
